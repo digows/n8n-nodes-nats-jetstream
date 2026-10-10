@@ -1,6 +1,6 @@
 # Validation evidence
 
-The manual grace-period limitation was explicitly approved and is recorded in the canonical [specification.md](specification.md). No npm publication or production deployment has been performed. The historical implementation measurements below belong to commit `c4a86f41988baeea73ab7e57cdf407a850bdab23`, then named `n8n-nodes-jetstream-nats`, with `JetstreamNats`/`jetstreamNats` identifiers. They are not new-name installation measurements; rename verification is recorded separately.
+The manual grace-period limitation was explicitly approved and is recorded in the canonical [specification.md](specification.md). No npm publication or production deployment has been performed. The historical implementation measurements below belong to commit `c4a86f41988baeea73ab7e57cdf407a850bdab23`, before the package and registration identifiers were renamed. They are not new-name installation measurements; rename verification is recorded separately.
 
 ## Measured environment
 
@@ -109,3 +109,17 @@ New-name validation used Node 24.21.0, n8n 2.42.3, n8n-workflow 2.42.2, official
 - The fresh fixture's SQLite native dependency initially failed to build with its bundled node-gyp 8.4.1 and Python 3.14.8. Rebuilding that temporary dependency with node-gyp 11.5.0 succeeded under Node 24.21.0; no package/host source patch was made.
 
 These are actual new-name integration/install measurements, not a relabeling of the historical results. The approved manual deadline semantics remain unchanged. No CI, npm publication or runtime deployment was added as part of the rename.
+
+## Current-tree naming acceptance
+
+Historical versions, timings and commit hashes remain unchanged, but current documentation no longer spells out obsolete package/class/registration names. This documentation-only follow-up does not change the runtime or the fixtures measured at `0edb91fe45a35abbb6a9ffd3a5dbbd6ce9e4dcbf`.
+
+The case-insensitive content and path scans below must produce no matches (ripgrep exit code 1). Dependencies and immutable Git internals are excluded; generated distribution files and source maps are included even though gitignored. Repeat the scans inside the extracted installation tarball, where there are no dependencies or Git internals. Package-entry checks additionally verify the current package, lockfile, repository URLs, node and credential registrations.
+
+```sh
+rg --text --no-ignore --hidden -n -i \
+  --glob '!node_modules/**' --glob '!.git/**' \
+  'jetstream[ _-]?nats' .
+find . -path './node_modules' -prune -o -path './.git' -prune -o -print \
+  | rg -i 'jetstream[ _-]?nats'
+```
