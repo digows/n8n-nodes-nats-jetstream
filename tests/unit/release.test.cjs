@@ -46,7 +46,16 @@ test('tag, package and both lockfile versions must agree', () =>
 test('repository metadata and compiled node/credential entries are consistent', () =>
 {
     validateRelease(`v${packageMetadata.version}`, packageMetadata, lockMetadata);
-    assert.equal(packageMetadata.repository.url, 'https://github.com/digows/n8n-nodes-nats-jetstream.git');
+    assert.equal(packageMetadata.repository.url, 'git+https://github.com/digows/n8n-nodes-nats-jetstream.git');
+    assert.equal(packageMetadata.homepage, 'https://github.com/digows/n8n-nodes-nats-jetstream');
+    assert.equal(packageMetadata.bugs.url, 'https://github.com/digows/n8n-nodes-nats-jetstream/issues');
+    assert.ok(packageMetadata.keywords.includes('n8n-community-node-package'));
+    for (const keyword of ['n8n', 'nats', 'jetstream', 'workflow-automation'])
+    {
+        assert.ok(packageMetadata.keywords.includes(keyword));
+    }
+    assert.equal(new Set(packageMetadata.keywords).size, packageMetadata.keywords.length);
+    assert.ok(packageMetadata.files.includes('CONTRIBUTING.md'));
     assert.deepEqual(packageMetadata.n8n.nodes, [
         'dist/nodes/NatsJetstream/NatsJetstream.node.js',
         'dist/nodes/NatsJetstream/NatsJetstreamTrigger.node.js',

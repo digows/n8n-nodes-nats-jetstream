@@ -1,6 +1,14 @@
 # Validation evidence
 
-The manual grace-period limitation was explicitly approved and is recorded in the canonical [specification.md](specification.md). No npm publication or production deployment has been performed. The historical implementation measurements below belong to commit `c4a86f41988baeea73ab7e57cdf407a850bdab23`, before the package and registration identifiers were renamed. They are not new-name installation measurements; rename verification is recorded separately.
+The manual grace-period limitation was explicitly approved and is recorded in the canonical [specification.md](specification.md). The historical implementation measurements below belong to commit `c4a86f41988baeea73ab7e57cdf407a850bdab23`, before the package and registration identifiers were renamed. They are not new-name installation measurements; rename verification and the subsequent public release are recorded separately.
+
+## Public release and subsequent runtime checks
+
+Version [0.1.0](https://www.npmjs.com/package/n8n-nodes-nats-jetstream/v/0.1.0) was published from tag `v0.1.0`, source commit `52f1c798bbe33ec6e612335be902f11f3cb86ac1`. [Publication run 38029187121](https://github.com/digows/n8n-nodes-nats-jetstream/actions/runs/38029187121) passed build/lint/types, 18 unit tests and 15 real-broker tests with zero failures/skips on Node 24.21.0 and npm 11.19.0. The public tarball's downloaded SHA-1 and SHA-512 matched the reviewed artifact. The registry exposes provenance attestations for this version.
+
+Package registration, credential loading, startup and readiness were subsequently checked in a custom self-hosted n8n 2.42.6 image, including main and queue-worker processes. Those checks do not replace the functional n8n 2.42.3 host suite below or establish universal compatibility.
+
+A separate native community-package installation attempt in that custom image returned `Cannot find module 'n8n-workflow'`. The successful image-bundled loading and the native installer failure are distinct paths; this observation does not establish a general failure on all n8n 2.42.6 installations. Native installer diagnosis is separate from the published artifact and the historical fresh-install host tests. Do not treat the standard installation instructions as evidence that every custom image layout has been validated.
 
 ## Measured environment
 

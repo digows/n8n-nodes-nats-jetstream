@@ -1,15 +1,72 @@
-# n8n-nodes-nats-jetstream
+# NATS JetStream for n8n
 
-Standalone NATS JetStream consumer and publisher community nodes for n8n.
+[![npm version](https://img.shields.io/npm/v/n8n-nodes-nats-jetstream)](https://www.npmjs.com/package/n8n-nodes-nats-jetstream)
+[![CI](https://github.com/digows/n8n-nodes-nats-jetstream/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/digows/n8n-nodes-nats-jetstream/actions/workflows/ci.yml)
+[![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-This package implements the approved contract and passes the stated target-host checks. It has not been published to npm or deployed. See [validation evidence](docs/validation.md), including the approved manual-mode limitation.
+**Connect self-hosted n8n workflows to NATS JetStream with durable message consumption and confirmed publishing.** `n8n-nodes-nats-jetstream` is an open-source TypeScript community node package for event-driven workflow automation, using the official NATS JavaScript SDK.
+
+Use it to trigger workflows from broker subjects, distribute work across a shared durable consumer, or publish JSON, text and binary messages to a JetStream stream. Version [0.1.0 is available on npm](https://www.npmjs.com/package/n8n-nodes-nats-jetstream/v/0.1.0). This is an **unverified community package for self-hosted n8n**, not an n8n Cloud verified integration.
+
+## Features
+
+- Durable pull consumer trigger with broker-side subject filters and bounded in-flight delivery.
+- Confirmed consumer acknowledgements after workflow success or a persisted n8n Wait handoff, not merely after emitting a message.
+- JSON, UTF-8 text and binary publishing with broker acknowledgements, headers and caller-supplied message IDs.
+- Native NATS username/password, token, NKey and `.creds` authentication.
+- Verified TLS, custom certificate authorities and mutual TLS (mTLS).
+- Existing-consumer binding by default, with explicit create-if-missing mode and reconnect handling.
+
+At-least-once delivery requires idempotent business effects. Read [completion and redelivery](#completion-and-redelivery), especially the manual-mode deadline, before consuming a production stream.
+
+## Installation
+
+Prerequisites: self-hosted n8n, Node.js 24 or newer, a reachable NATS server with JetStream enabled, and an existing stream. Consumer creation requires nats-server 2.10 or newer. Broker permissions are described [below](#broker-permissions).
+
+### Install from the n8n editor
+
+As an n8n Owner or Admin:
+
+1. Open **Settings → Community Nodes → Install**.
+2. Enter `n8n-nodes-nats-jetstream@0.1.0` to select the published version explicitly.
+3. Review the community-node risks and select **Install**.
+4. Find **NATS JetStream Trigger** and **NATS JetStream** in the node picker.
+
+Follow the official [n8n GUI installation guide](https://docs.n8n.io/integrations/community-nodes/installation-and-management/gui-installation.md). Queue-mode deployments require the official [manual installation procedure](https://docs.n8n.io/integrations/community-nodes/installation-and-management/manual-installation.md), with the package available to the main process and workers. Running `npm install` in an unrelated project directory does not install a node into n8n.
+
+The functional regular/queue host suites were measured on n8n 2.42.3. Package registration and startup were subsequently verified in a custom n8n 2.42.6 image; that is not a rerun of the functional host suite or proof of every native installer path. See [validation evidence](docs/validation.md) for the measured scope and installation caveat.
+
+## Quick start
+
+### Trigger a workflow from a JetStream message
+
+1. Create a **NATS JetStream API** credential with your server address and authentication settings. Keep secrets in the credential, not the workflow payload.
+2. Add **NATS JetStream Trigger**. Set **Stream** and **Durable Consumer** to a durable pull consumer configured with explicit acknowledgements.
+3. Keep **Consumer Mode → Bind Existing** to avoid changing the broker configuration. Set **Payload Format → JSON** for JSON messages.
+4. Use `{{ $json.payload }}` to read the message payload in downstream nodes and `{{ $json.metadata.subject }}` to read its subject.
+
+Use a dedicated test consumer for manual executions: testing consumes real messages and can advance its cursor.
+
+### Publish a JSON message
+
+Add **NATS JetStream**, select the same credential, and configure:
+
+| Field | Example |
+| --- | --- |
+| Subject | `orders.created` |
+| Payload Format | `JSON` |
+| JSON Payload, expression mode | `{{ $json }}` |
+| Options → Message ID | A stable identifier for the logical event, reused on retries |
+| Options → Expected Stream | The stream that should store the message, when required |
+
+The subject must match an existing stream. The node returns the broker's `stream`, `sequence` and `duplicate` result; it does not claim that a consumer has processed the message. See [output and publishing](#output-and-publishing) for formats, expressions and retry ambiguity.
 
 ## Nodes
 
 - **NATS JetStream Trigger** consumes a named durable pull consumer. A message is acknowledged only after the parent workflow succeeds or n8n persists a resumable Wait execution.
 - **NATS JetStream** publishes JSON, UTF-8 text or an input binary field, waits for the broker's publication acknowledgement, and returns one paired result per input item.
 
-The package uses the official NATS SDK 3.4.0. The validation target is self-hosted n8n 2.42.3 on Node.js 24. It does not claim compatibility with other n8n versions or n8n Cloud verification. No application-specific routing, automatic dead-letter queue, broker deployment or stream administration is included.
+The package uses the official NATS SDK 3.4.0. No application-specific routing, automatic dead-letter queue, broker deployment or stream administration is included. Core NATS subscriptions, business request/reply services, KV and Object Store are outside this package's scope.
 
 ## Credentials
 
@@ -105,4 +162,13 @@ See [the approved specification](docs/specification.md) for authentication, cons
 
 See [CI and npm releases](docs/releases.md) for validation workflows, npm credentials/OIDC setup, SemVer tags and publication. CI does not publish ordinary pushes or pull requests.
 
-Licensed under [MIT](LICENSE).
+## Documentation and support
+
+- [Package specification](docs/specification.md): authentication, delivery guarantees and public API boundaries.
+- [Validation evidence](docs/validation.md): exact versions, measured tests and known limitations.
+- [CI and npm releases](docs/releases.md): versioned publication and provenance.
+- [Contributing](CONTRIBUTING.md): development setup and reporting reproducible problems.
+- [GitHub issues](https://github.com/digows/n8n-nodes-nats-jetstream/issues): bug reports and feature requests.
+- [npm package](https://www.npmjs.com/package/n8n-nodes-nats-jetstream): published versions and installation metadata.
+
+Maintained by [Rodrigo P. Fraga](https://github.com/digows). This repository is not an official n8n or NATS project. Licensed under [MIT](LICENSE), including commercial use.
