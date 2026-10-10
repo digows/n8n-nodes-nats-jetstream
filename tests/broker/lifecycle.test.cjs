@@ -6,7 +6,7 @@ const { connect } = require('@nats-io/transport-node');
 const { jetstream, jetstreamManager, AckPolicy, DeliverPolicy, StorageType } = require('@nats-io/jetstream');
 const { broker, until, triggerContext, run } = require('../helpers.cjs');
 const { bindConsumer, creationConfiguration } = require('../../dist/lib/consumer');
-const { JetstreamNatsTrigger } = require('../../dist/nodes/JetstreamNats/JetstreamNatsTrigger.node');
+const { NatsJetstreamTrigger } = require('../../dist/nodes/NatsJetstream/NatsJetstreamTrigger.node');
 
 test('overlapping trigger processes distribute deliveries; crash recovery preserves the durable cursor', async () =>
 {
@@ -70,7 +70,7 @@ test('broker restart reconnects without creating another consumer; repeated manu
         const parameters = { stream: 'LIFECYCLE', durable: 'reconnect', consumerMode: 'create', creation: { subjectFilters: 'lifecycle.reconnect', ackWaitMs: 300 }, payloadFormat: 'json', options: { shutdownGraceMs: 100, pullTimeoutMs: 1000 } };
         const deliveries = [];
         const context = triggerContext({ servers: server.url, authentication: 'none' }, parameters, (items, _response, completion) => { deliveries.push(items[0][0].json.metadata); completion.resolve(run('success')); });
-        response = await JetstreamNatsTrigger.prototype.trigger.call(context);
+        response = await NatsJetstreamTrigger.prototype.trigger.call(context);
         await client.publish('lifecycle.reconnect', Buffer.from('{}'));
         await until(() => deliveries.length === 1);
         await until(async () => (await manager.consumers.info('LIFECYCLE', 'reconnect')).num_ack_pending === 0);
@@ -86,7 +86,7 @@ test('broker restart reconnects without creating another consumer; repeated manu
         {
             const manualContext = triggerContext({ servers: server.url, authentication: 'none' }, { ...parameters, consumerMode: 'existing' }, (_items, _response, completion) => completion.resolve(run('success')));
             manualContext.getMode = () => 'manual';
-            response = await JetstreamNatsTrigger.prototype.trigger.call(manualContext);
+            response = await NatsJetstreamTrigger.prototype.trigger.call(manualContext);
             await client.publish('lifecycle.reconnect', Buffer.from('{}'));
             await response.manualTriggerFunction();
             await until(async () => { const info = await manager.consumers.info('LIFECYCLE', 'reconnect'); return info.num_ack_pending === 0 && info.num_pending === 0; });
@@ -94,7 +94,7 @@ test('broker restart reconnects without creating another consumer; repeated manu
             await until(async () => await server.connections() === 1);
         }
         assert.equal((await manager.consumers.list('LIFECYCLE').next()).length, 1);
-        await assert.rejects(JetstreamNatsTrigger.prototype.trigger.call(triggerContext({ servers: server.url, authentication: 'none' }, { ...parameters, durable: 'absent', consumerMode: 'existing' }, () => {})));
+        await assert.rejects(NatsJetstreamTrigger.prototype.trigger.call(triggerContext({ servers: server.url, authentication: 'none' }, { ...parameters, durable: 'absent', consumerMode: 'existing' }, () => {})));
         await until(async () => await server.connections() === 1);
     }
     finally { await response?.closeFunction(); await connection.close(); await server.close(); }

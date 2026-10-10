@@ -1,4 +1,4 @@
-# n8n-nodes-jetstream-nats
+# n8n-nodes-nats-jetstream
 
 ## Purpose and scope
 
@@ -8,9 +8,9 @@ The approved first version contains two programmatic nodes and one credential ty
 
 | Component | Internal name | Responsibility |
 | --- | --- | --- |
-| JetStream NATS Trigger | `jetstreamNatsTrigger` | Consume an existing stream through a named durable pull consumer. |
-| JetStream NATS | `jetstreamNats` | Publish messages and return the broker's publication acknowledgement. |
-| JetStream NATS credential | `jetstreamNatsApi` | Connection, native NATS authentication, and TLS settings. |
+| NATS JetStream Trigger | `natsJetstreamTrigger` | Consume an existing stream through a named durable pull consumer. |
+| NATS JetStream | `natsJetstream` | Publish messages and return the broker's publication acknowledgement. |
+| NATS JetStream credential | `natsJetstreamApi` | Connection, native NATS authentication, and TLS settings. |
 
 Use the official NATS JavaScript SDK, not a new protocol implementation or a fork of a larger integration package. The package license is MIT, including commercial use.
 
@@ -22,7 +22,7 @@ Initial n8n validation target: **n8n 2.42.3, Node.js 24**. Use public `n8n-workf
 
 The published package must follow the official community-node contract:
 
-- Package name `n8n-nodes-jetstream-nats` and keyword `n8n-community-node-package`.
+- Package name `n8n-nodes-nats-jetstream` and keyword `n8n-community-node-package`.
 - `n8n.n8nNodesApiVersion: 1`, with compiled node and credential paths.
 - Node `version: 1`, stable internal names, correct trigger inputs/outputs, and bundled icons.
 - `peerDependencies: { "n8n-workflow": "*" }`, as required by the official community-node lint rule. Use a development dependency compatible with the validation target.

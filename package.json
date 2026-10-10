@@ -1,12 +1,12 @@
 {
-  "name": "n8n-nodes-jetstream-nats",
+  "name": "n8n-nodes-nats-jetstream",
   "version": "0.1.0",
   "description": "Durable NATS JetStream trigger and confirmed publisher for n8n",
   "license": "MIT",
-  "homepage": "https://github.com/digows/n8n-nodes-jetstream-nats",
+  "homepage": "https://github.com/digows/n8n-nodes-nats-jetstream",
   "keywords": ["n8n-community-node-package"],
   "author": { "name": "Rodrigo P. Fraga", "email": "rodrigo.p.fraga@gmail.com" },
-  "repository": { "type": "git", "url": "https://github.com/digows/n8n-nodes-jetstream-nats.git" },
+  "repository": { "type": "git", "url": "https://github.com/digows/n8n-nodes-nats-jetstream.git" },
   "engines": { "node": ">=24" },
   "files": ["dist", "README.md", "LICENSE", "docs"],
   "scripts": {
@@ -20,8 +20,8 @@
   },
   "n8n": {
     "n8nNodesApiVersion": 1,
-    "credentials": ["dist/credentials/JetstreamNatsApi.credentials.js"],
-    "nodes": ["dist/nodes/JetstreamNats/JetstreamNats.node.js", "dist/nodes/JetstreamNats/JetstreamNatsTrigger.node.js"]
+    "credentials": ["dist/credentials/NatsJetstreamApi.credentials.js"],
+    "nodes": ["dist/nodes/NatsJetstream/NatsJetstream.node.js", "dist/nodes/NatsJetstream/NatsJetstreamTrigger.node.js"]
   },
   "dependencies": { "@nats-io/jetstream": "3.4.0", "@nats-io/transport-node": "3.4.0" },
   "peerDependencies": { "n8n-workflow": "*" },

@@ -5,8 +5,8 @@ const { jetstream, jetstreamManager, AckPolicy, StorageType, DeliverPolicy } = r
 const { broker, until, triggerContext, run } = require('../helpers.cjs');
 const { bindConsumer, creationConfiguration } = require('../../dist/lib/consumer');
 const { openConnection } = require('../../dist/lib/connection');
-const { JetstreamNatsTrigger } = require('../../dist/nodes/JetstreamNats/JetstreamNatsTrigger.node');
-const { JetstreamNats } = require('../../dist/nodes/JetstreamNats/JetstreamNats.node');
+const { NatsJetstreamTrigger } = require('../../dist/nodes/NatsJetstream/NatsJetstreamTrigger.node');
+const { NatsJetstream } = require('../../dist/nodes/NatsJetstream/NatsJetstream.node');
 
 test('real JetStream creation, consumption and publishing', async suite =>
 {
@@ -53,24 +53,24 @@ test('real JetStream creation, consumption and publishing', async suite =>
                 getNodeParameter: (name, index) => parameters[index][name], getNode: () => ({ name: 'publisher' }), continueOnFail: () => false,
                 helpers: { async getBinaryDataBuffer(index, field) { assert.equal(index, 2); assert.equal(field, 'data'); binaryReads++; return Buffer.from([0, 1, 255]); } },
             };
-            const [results] = await JetstreamNats.prototype.execute.call(context);
+            const [results] = await NatsJetstream.prototype.execute.call(context);
             assert.equal(results.length, 3); assert.equal(binaryReads, 1);
             results.forEach((item, index) => assert.equal(item.pairedItem.item, index));
             const duplicateContext = { ...context, getInputData: () => [{}], getNodeParameter: name => parameters[0][name] };
-            const [[duplicate]] = await JetstreamNats.prototype.execute.call(duplicateContext);
+            const [[duplicate]] = await NatsJetstream.prototype.execute.call(duplicateContext);
             assert.equal(duplicate.json.duplicate, true);
             const stored = await manager.streams.getMessage('TESTS', { seq: Number(results[0].json.sequence) });
             assert.equal(Buffer.from(stored.data).toString(), '{"value":1}');
             assert.deepEqual(stored.header.values('X-Test'), ['one', 'two']);
             parameters[0].options.expectedStream = 'WRONG';
-            await assert.rejects(JetstreamNats.prototype.execute.call(duplicateContext), /stream/i);
+            await assert.rejects(NatsJetstream.prototype.execute.call(duplicateContext), /stream/i);
         });
         await suite.test('no ACK on emit, bounded in-flight and progress beyond AckWait', async () =>
         {
             await manager.consumers.add('TESTS', { durable_name: 'progress', ack_policy: AckPolicy.Explicit, deliver_policy: DeliverPolicy.New, filter_subject: 'tests.progress', ack_wait: 150000000 });
             const pending = [];
             const context = triggerContext(credential, { stream: 'TESTS', durable: 'progress', consumerMode: 'existing', payloadFormat: 'json', options: { maxInFlight: 2, pullTimeoutMs: 1000, shutdownGraceMs: 1000 } }, (_items, _response, completion) => pending.push(completion));
-            const response = await JetstreamNatsTrigger.prototype.trigger.call(context);
+            const response = await NatsJetstreamTrigger.prototype.trigger.call(context);
             try
             {
                 for (let index = 0; index < 5; index++) await client.publish('tests.progress', Buffer.from('{"test":true}'));
@@ -96,7 +96,7 @@ test('real JetStream creation, consumption and publishing', async suite =>
             {
                 items.push(received[0][0]); completion.resolve(run(++deliveries === 1 ? 'error' : 'success'));
             });
-            const response = await JetstreamNatsTrigger.prototype.trigger.call(context);
+            const response = await NatsJetstreamTrigger.prototype.trigger.call(context);
             try
             {
                 await client.publish('tests.retry', Buffer.from('{}'));
@@ -111,7 +111,7 @@ test('real JetStream creation, consumption and publishing', async suite =>
             const received = [];
             const parameters = { stream: 'TESTS', durable: 'shutdown', consumerMode: 'create', creation: { subjectFilters: 'tests.shutdown', ackWaitMs: 100 }, payloadFormat: 'text', options: { shutdownGraceMs: 50, nakDelayMs: 50, pullTimeoutMs: 1000 } };
             const context = triggerContext(credential, parameters, items => received.push(items));
-            const response = await JetstreamNatsTrigger.prototype.trigger.call(context);
+            const response = await NatsJetstreamTrigger.prototype.trigger.call(context);
             await client.publish('tests.shutdown', Buffer.from('real'));
             await until(() => received.length === 1);
             await response.closeFunction();
@@ -119,7 +119,7 @@ test('real JetStream creation, consumption and publishing', async suite =>
             let manualCompletion;
             const manualContext = triggerContext(credential, { ...parameters, consumerMode: 'existing' }, (items, _response, completion) => { assert.equal(items[0][0].json.payload, 'real'); manualCompletion = completion; });
             manualContext.getMode = () => 'manual';
-            const manualResponse = await JetstreamNatsTrigger.prototype.trigger.call(manualContext);
+            const manualResponse = await NatsJetstreamTrigger.prototype.trigger.call(manualContext);
             assert.equal(manualCompletion, undefined);
             await manualResponse.manualTriggerFunction();
             await until(() => manualCompletion);
@@ -134,9 +134,9 @@ test('real JetStream creation, consumption and publishing', async suite =>
             {
                 await assert.rejects(openConnection({ servers: protectedServer.url, authentication: 'none' }), /connection failed/);
                 const protectedCredentials = { servers: protectedServer.url, authentication: 'userPassword', username: 'tester', password: 'test-password' };
-                const result = await new JetstreamNats().methods.credentialTest.testConnection({ data: protectedCredentials });
+                const result = await new NatsJetstream().methods.credentialTest.testConnection({ data: protectedCredentials });
                 assert.equal(result.status, 'OK');
-                const invalidResult = await new JetstreamNats().methods.credentialTest.testConnection({ data: { ...protectedCredentials, password: 'wrong', connectionTimeoutMs: 100 } });
+                const invalidResult = await new NatsJetstream().methods.credentialTest.testConnection({ data: { ...protectedCredentials, password: 'wrong', connectionTimeoutMs: 100 } });
                 assert.equal(invalidResult.status, 'Error');
                 const protectedConnection = await openConnection(protectedCredentials);
                 const protectedManager = await jetstreamManager(protectedConnection);

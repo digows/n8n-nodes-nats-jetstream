@@ -3,8 +3,8 @@ const { test } = require('node:test');
 const { connect } = require('@nats-io/transport-node');
 const { jetstream, jetstreamManager, AckPolicy, StorageType } = require('@nats-io/jetstream');
 const { broker, until, triggerContext, run } = require('../helpers.cjs');
-const { JetstreamNats } = require('../../dist/nodes/JetstreamNats/JetstreamNats.node');
-const { JetstreamNatsTrigger } = require('../../dist/nodes/JetstreamNats/JetstreamNatsTrigger.node');
+const { NatsJetstream } = require('../../dist/nodes/NatsJetstream/NatsJetstream.node');
+const { NatsJetstreamTrigger } = require('../../dist/nodes/NatsJetstream/NatsJetstreamTrigger.node');
 
 test('publication permissions, lost reply ambiguity and unconfirmed consumer ACK are visible', async () =>
 {
@@ -28,14 +28,14 @@ test('publication permissions, lost reply ambiguity and unconfirmed consumer ACK
                 getNodeParameter: name => ({ subject, payloadFormat: 'text', textPayload: 'payload', options: { publishTimeoutMs: 100, messageId: 'stable-uncertain' } })[name],
             };
         }
-        await assert.rejects(JetstreamNats.prototype.execute.call(publisher('publisher', 'publisher-test', 'uncertain.denied')), /permission|timeout/i);
+        await assert.rejects(NatsJetstream.prototype.execute.call(publisher('publisher', 'publisher-test', 'uncertain.denied')), /permission|timeout/i);
         const storedBefore = (await manager.streams.info('UNCERTAIN')).state.messages;
-        await assert.rejects(JetstreamNats.prototype.execute.call(publisher('lostReply', 'reply-test', 'uncertain.allowed')), /permission|timeout/i);
+        await assert.rejects(NatsJetstream.prototype.execute.call(publisher('lostReply', 'reply-test', 'uncertain.allowed')), /permission|timeout/i);
         const storedAfter = (await manager.streams.info('UNCERTAIN')).state.messages;
         assert.equal(storedAfter, storedBefore + 1, 'Publication can be stored even though its response is lost');
         await manager.consumers.add('UNCERTAIN', { durable_name: 'noack', ack_policy: AckPolicy.Explicit, filter_subject: 'uncertain.noack', ack_wait: 1000000000, max_deliver: 2 });
         const context = triggerContext({ servers: server.url, authentication: 'userPassword', username: 'noAck', password: 'ack-test' }, { stream: 'UNCERTAIN', durable: 'noack', consumerMode: 'existing', payloadFormat: 'text', options: { ackTimeoutMs: 100, shutdownGraceMs: 100, pullTimeoutMs: 1000 } }, (_items, _unused, completion) => completion.resolve(run('success')));
-        response = await JetstreamNatsTrigger.prototype.trigger.call(context);
+        response = await NatsJetstreamTrigger.prototype.trigger.call(context);
         await client.publish('uncertain.noack', Buffer.from('payload'));
         await until(() => context.failures.length > 0);
         assert.match(context.failures[0].message, /confirmation is unknown/);

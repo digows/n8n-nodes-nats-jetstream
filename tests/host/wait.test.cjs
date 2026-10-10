@@ -113,15 +113,16 @@ for (const mode of ['regular', 'queue'])
             {
                 instance = await host(join(directory, 'host'), mode);
                 sqlite = new DatabaseSync(join(directory, 'host', '.n8n', 'database.sqlite'));
+                sqlite.exec('PRAGMA busy_timeout = 5000');
             }
             const nodeDescriptions = await instance.request('/types/nodes.json');
             const descriptions = Array.isArray(nodeDescriptions) ? nodeDescriptions : Object.values(nodeDescriptions);
-            assert.ok(descriptions.some(value => value.name === 'n8n-nodes-jetstream-nats.jetstreamNatsTrigger'), 'Installed trigger must appear');
-            assert.ok(descriptions.some(value => value.name === 'n8n-nodes-jetstream-nats.jetstreamNats'), 'Installed publisher must appear');
-            const credential = await instance.request('/rest/credentials', 'POST', { name: 'Local NATS Test', type: 'jetstreamNatsApi', data: { servers: server.url, authentication: 'none' } });
+            assert.ok(descriptions.some(value => value.name === 'n8n-nodes-nats-jetstream.natsJetstreamTrigger'), 'Installed trigger must appear');
+            assert.ok(descriptions.some(value => value.name === 'n8n-nodes-nats-jetstream.natsJetstream'), 'Installed publisher must appear');
+            const credential = await instance.request('/rest/credentials', 'POST', { name: 'Local NATS Test', type: 'natsJetstreamApi', data: { servers: server.url, authentication: 'none' } });
             async function createWorkflow(name, suffix, failAfterWait = false, activate = true)
             {
-                const trigger = { id: `trigger-${suffix}`, name: 'JetStream', type: 'n8n-nodes-jetstream-nats.jetstreamNatsTrigger', typeVersion: 1, position: [0, 0], credentials: { jetstreamNatsApi: { id: credential.id, name: credential.name } }, parameters: { stream: 'HOST', durable: suffix, consumerMode: 'create', creation: { subjectFilters: `host.${suffix}`, ackWaitMs: 150 }, payloadFormat: 'json', options: { maxInFlight: 2, nakDelayMs: 100, pullTimeoutMs: 1000, shutdownGraceMs: 100 } } };
+                const trigger = { id: `trigger-${suffix}`, name: 'JetStream', type: 'n8n-nodes-nats-jetstream.natsJetstreamTrigger', typeVersion: 1, position: [0, 0], credentials: { natsJetstreamApi: { id: credential.id, name: credential.name } }, parameters: { stream: 'HOST', durable: suffix, consumerMode: 'create', creation: { subjectFilters: `host.${suffix}`, ackWaitMs: 150 }, payloadFormat: 'json', options: { maxInFlight: 2, nakDelayMs: 100, pullTimeoutMs: 1000, shutdownGraceMs: 100 } } };
                 const wait = { id: `wait-${suffix}`, webhookId: `wait-${suffix}`, name: 'Wait', type: 'n8n-nodes-base.wait', typeVersion: 1.1, position: [200, 0], parameters: { resume: 'webhook', httpMethod: 'POST', responseMode: 'onReceived', options: {} } };
                 const after = { id: `after-${suffix}`, name: 'After', type: failAfterWait ? 'n8n-nodes-base.stopAndError' : 'n8n-nodes-base.noOp', typeVersion: 1, position: [400, 0], parameters: failAfterWait ? { errorMessage: 'Synthetic failure after Wait' } : {} };
                 const workflow = await instance.request('/rest/workflows', 'POST', { name, nodes: [trigger, wait, after], connections: { JetStream: { main: [[{ node: 'Wait', type: 'main', index: 0 }]] }, Wait: { main: [[{ node: 'After', type: 'main', index: 0 }]] } }, settings: { executionOrder: 'v1', saveDataSuccessExecution: 'all', saveDataErrorExecution: 'all', saveManualExecutions: true } });
@@ -230,7 +231,7 @@ for (const mode of ['regular', 'queue'])
             await new Promise(resolve => slowServer.listen(0, '127.0.0.1', resolve));
             async function createManualWorkflow(suffix, graceMs, delayMs = 0, persistedWait = false)
             {
-                const trigger = { id: `manual-${suffix}`, name: 'JetStream', type: 'n8n-nodes-jetstream-nats.jetstreamNatsTrigger', typeVersion: 1, position: [0, 0], credentials: { jetstreamNatsApi: { id: credential.id, name: credential.name } }, parameters: { stream: 'HOST', durable: suffix, consumerMode: 'create', creation: { subjectFilters: `host.${suffix}`, ackWaitMs: 150 }, payloadFormat: 'json', options: { nakDelayMs: 100, pullTimeoutMs: 1000, shutdownGraceMs: graceMs } } };
+                const trigger = { id: `manual-${suffix}`, name: 'JetStream', type: 'n8n-nodes-nats-jetstream.natsJetstreamTrigger', typeVersion: 1, position: [0, 0], credentials: { natsJetstreamApi: { id: credential.id, name: credential.name } }, parameters: { stream: 'HOST', durable: suffix, consumerMode: 'create', creation: { subjectFilters: `host.${suffix}`, ackWaitMs: 150 }, payloadFormat: 'json', options: { nakDelayMs: 100, pullTimeoutMs: 1000, shutdownGraceMs: graceMs } } };
                 const after = persistedWait
                     ? { id: `wait-${suffix}`, webhookId: `wait-${suffix}`, name: 'After', type: 'n8n-nodes-base.wait', typeVersion: 1.1, position: [200, 0], parameters: { resume: 'webhook', httpMethod: 'POST', responseMode: 'onReceived', options: {} } }
                     : delayMs > 0

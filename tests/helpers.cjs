@@ -89,7 +89,7 @@ function triggerContext(credentials, parameters, emit)
     const failures = [], fatal = [];
     return {
         failures, fatal, parameters, logger: { warn() {}, info() {} },
-        getMode: () => 'trigger', getNode: () => ({ name: 'JetStream test', type: 'jetstreamNatsTrigger', typeVersion: 1 }),
+        getMode: () => 'trigger', getNode: () => ({ name: 'JetStream test', type: 'natsJetstreamTrigger', typeVersion: 1 }),
         async getCredentials() { return credentials; },
         getNodeParameter(name) { return parameters[name]; },
         saveFailedExecution(error) { failures.push(error); }, emitError(error) { fatal.push(error); },

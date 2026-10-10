@@ -1,5 +1,5 @@
 const { triggerContext, run } = require('../helpers.cjs');
-const { JetstreamNatsTrigger } = require('../../dist/nodes/JetstreamNats/JetstreamNatsTrigger.node');
+const { NatsJetstreamTrigger } = require('../../dist/nodes/NatsJetstream/NatsJetstreamTrigger.node');
 
 const completions = new Map();
 let response;
@@ -22,7 +22,7 @@ const context = triggerContext({ servers: process.env.TEST_NATS_URL, authenticat
     process.send({ type: 'delivery', metadata });
 });
 context.emitError = () => process.send({ type: 'fatal' });
-JetstreamNatsTrigger.prototype.trigger.call(context).then(result =>
+NatsJetstreamTrigger.prototype.trigger.call(context).then(result =>
 {
     response = result;
     process.send({ type: 'ready' });

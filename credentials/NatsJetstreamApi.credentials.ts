@@ -1,11 +1,11 @@
 import type { ICredentialType, INodeProperties, Icon } from 'n8n-workflow';
 
-export class JetstreamNatsApi implements ICredentialType
+export class NatsJetstreamApi implements ICredentialType
 {
-    name = 'jetstreamNatsApi';
-    displayName = 'JetStream NATS API';
-    icon: Icon = { light: 'file:../nodes/JetstreamNats/jetstream.svg', dark: 'file:../nodes/JetstreamNats/jetstream.svg' };
-    documentationUrl = 'https://github.com/digows/n8n-nodes-jetstream-nats#credentials';
+    name = 'natsJetstreamApi';
+    displayName = 'NATS JetStream API';
+    icon: Icon = { light: 'file:../nodes/NatsJetstream/jetstream.svg', dark: 'file:../nodes/NatsJetstream/jetstream.svg' };
+    documentationUrl = 'https://github.com/digows/n8n-nodes-nats-jetstream#credentials';
     properties: INodeProperties[] = [
         { displayName: 'Server Addresses', name: 'servers', type: 'string', default: 'nats://localhost:4222', required: true, description: 'Comma- or whitespace-separated NATS server addresses without embedded credentials' },
         { displayName: 'Connection Name', name: 'connectionName', type: 'string', default: '' },

@@ -4,15 +4,15 @@ import { bindConsumer, creationConfiguration, progressInterval } from '../../lib
 import { openConnection, optionalText, positiveInteger, requiredText, withinTimeout } from '../../lib/connection';
 import { deliverMessage } from '../../lib/delivery';
 import type { PayloadFormat } from '../../lib/payload';
-import { JetstreamNats } from './JetstreamNats.node';
+import { NatsJetstream } from './NatsJetstream.node';
 
-export class JetstreamNatsTrigger implements INodeType
+export class NatsJetstreamTrigger implements INodeType
 {
     description: INodeTypeDescription = {
-        displayName: 'JetStream NATS Trigger', name: 'jetstreamNatsTrigger', group: ['trigger'], version: 1,
+        displayName: 'NATS JetStream Trigger', name: 'natsJetstreamTrigger', group: ['trigger'], version: 1,
         description: 'Consume a durable pull consumer; ACK after successful execution or persisted Wait', subtitle: 'Consume a durable pull consumer',
-        defaults: { name: 'JetStream NATS Trigger' }, icon: { light: 'file:jetstream.svg', dark: 'file:jetstream.svg' }, inputs: [], outputs: [NodeConnectionTypes.Main],
-        credentials: [{ name: 'jetstreamNatsApi', required: true, testedBy: 'testConnection' }],
+        defaults: { name: 'NATS JetStream Trigger' }, icon: { light: 'file:jetstream.svg', dark: 'file:jetstream.svg' }, inputs: [], outputs: [NodeConnectionTypes.Main],
+        credentials: [{ name: 'natsJetstreamApi', required: true, testedBy: 'testConnection' }],
         properties: [
             { displayName: 'Manual testing consumes real messages and can advance the selected durable consumer. Use a dedicated test consumer.', name: 'manualNotice', type: 'notice', default: '' },
             { displayName: 'Stream', name: 'stream', type: 'string', default: '', required: true },
@@ -36,11 +36,11 @@ export class JetstreamNatsTrigger implements INodeType
         ],
     };
 
-    methods = new JetstreamNats().methods;
+    methods = new NatsJetstream().methods;
 
     async trigger(this: ITriggerFunctions): Promise<ITriggerResponse>
     {
-        const credentials = await this.getCredentials('jetstreamNatsApi');
+        const credentials = await this.getCredentials('natsJetstreamApi');
         const stream = requiredText(this.getNodeParameter('stream'), 'Stream');
         const durable = requiredText(this.getNodeParameter('durable'), 'Durable consumer');
         const mode = this.getNodeParameter('consumerMode') as 'existing' | 'create';

@@ -1,4 +1,4 @@
-# n8n-nodes-jetstream-nats
+# n8n-nodes-nats-jetstream
 
 Standalone NATS JetStream consumer and publisher community nodes for n8n.
 
@@ -6,14 +6,14 @@ This package implements the approved contract and passes the stated target-host 
 
 ## Nodes
 
-- **JetStream NATS Trigger** consumes a named durable pull consumer. A message is acknowledged only after the parent workflow succeeds or n8n persists a resumable Wait execution.
-- **JetStream NATS** publishes JSON, UTF-8 text or an input binary field, waits for the broker's publication acknowledgement, and returns one paired result per input item.
+- **NATS JetStream Trigger** consumes a named durable pull consumer. A message is acknowledged only after the parent workflow succeeds or n8n persists a resumable Wait execution.
+- **NATS JetStream** publishes JSON, UTF-8 text or an input binary field, waits for the broker's publication acknowledgement, and returns one paired result per input item.
 
 The package uses the official NATS SDK 3.4.0. The validation target is self-hosted n8n 2.42.3 on Node.js 24. It does not claim compatibility with other n8n versions or n8n Cloud verification. No application-specific routing, automatic dead-letter queue, broker deployment or stream administration is included.
 
 ## Credentials
 
-Use the **JetStream NATS API** credential for both nodes. Enter one or more server addresses separated by commas or whitespace, without embedded authentication. Optionally configure a connection name, connection timeout and JetStream domain.
+Use the **NATS JetStream API** credential for both nodes. Enter one or more server addresses separated by commas or whitespace, without embedded authentication. Optionally configure a connection name, connection timeout and JetStream domain.
 
 Select None, Username/Password, Token, NKey private seed, or complete `.creds` content. These are native NATS authentication mechanisms: an OIDC access token is not automatically a NATS user JWT. Required credentials never fall back to anonymous authentication.
 

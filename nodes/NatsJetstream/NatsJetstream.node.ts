@@ -4,14 +4,14 @@ import { NodeConnectionTypes, NodeOperationError, type ICredentialTestFunctions,
 import { openConnection, optionalText, positiveInteger, withinTimeout } from '../../lib/connection';
 import { publishHeaders, publishPayload, publishSubject, sequenceString, type PayloadFormat } from '../../lib/payload';
 
-export class JetstreamNats implements INodeType
+export class NatsJetstream implements INodeType
 {
     description: INodeTypeDescription = {
-        displayName: 'JetStream NATS', name: 'jetstreamNats', group: ['output'], version: 1,
+        displayName: 'NATS JetStream', name: 'natsJetstream', group: ['output'], version: 1,
         subtitle: 'Publish a message', description: 'Publish to NATS JetStream and await broker acknowledgement',
-        defaults: { name: 'JetStream NATS' }, icon: { light: 'file:jetstream.svg', dark: 'file:jetstream.svg' },
+        defaults: { name: 'NATS JetStream' }, icon: { light: 'file:jetstream.svg', dark: 'file:jetstream.svg' },
         inputs: [NodeConnectionTypes.Main], outputs: [NodeConnectionTypes.Main], usableAsTool: true,
-        credentials: [{ name: 'jetstreamNatsApi', required: true, testedBy: 'testConnection' }],
+        credentials: [{ name: 'natsJetstreamApi', required: true, testedBy: 'testConnection' }],
         properties: [
             { displayName: 'Subject', name: 'subject', type: 'string', default: '', required: true, placeholder: 'orders.created', description: 'Literal publication subject; supports expressions but not subscription wildcards' },
             { displayName: 'Payload Format', name: 'payloadFormat', type: 'options', default: 'json', options: [{ name: 'JSON', value: 'json' }, { name: 'Text', value: 'text' }, { name: 'Binary', value: 'binary' }] },
@@ -53,7 +53,7 @@ export class JetstreamNats implements INodeType
 
     async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]>
     {
-        const credentials = await this.getCredentials('jetstreamNatsApi');
+        const credentials = await this.getCredentials('natsJetstreamApi');
         const connection = await openConnection(credentials);
         const results: INodeExecutionData[] = [];
         try

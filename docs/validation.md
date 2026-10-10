@@ -1,6 +1,6 @@
 # Validation evidence
 
-The bounded manual implementation passes the target-host suite. Its measured manual grace-period limitation was explicitly approved and is recorded in the canonical [specification.md](specification.md). No npm publication or production deployment has been performed.
+The manual grace-period limitation was explicitly approved and is recorded in the canonical [specification.md](specification.md). No npm publication or production deployment has been performed. The historical implementation measurements below belong to commit `c4a86f41988baeea73ab7e57cdf407a850bdab23`, then named `n8n-nodes-jetstream-nats`, with `JetstreamNats`/`jetstreamNats` identifiers. They are not new-name installation measurements; rename verification is recorded separately.
 
 ## Measured environment
 
@@ -19,7 +19,7 @@ The bounded manual implementation passes the target-host suite. Its measured man
 
 All server/host processes and databases were dedicated local fixtures. No n8n private-core imports or modifications are used by the package. Host source was inspected to diagnose public lifecycle ordering; host tests use fixture-only REST calls and database assertions/fault injection.
 
-## Passing measurements
+## Historical implementation measurements
 
 `npm run check` passed build, official lint (zero rule errors/warnings), TypeScript checks and 8 deterministic unit tests. The CLI emits its own terminal color environment warnings; those are not lint findings.
 
@@ -85,10 +85,27 @@ On n8n 2.42.3, manual close starts immediately after trigger output. Consequentl
 
 These measured semantics were explicitly approved after their redelivery/duplicate-effect consequence was explained. The canonical specification and the existing option's UI description now state them. No unsupported-manual fallback or additional option was introduced.
 
-## Finalization scope
+## Historical finalization scope — c4a86f4
 
 The broker result (15 passed, zero failures/skips) and expanded host result (2 mode suites passed, zero failures/skips) apply to the runtime and fixtures included in this implementation commit. After those measurements, finalization changed only the canonical manual-mode clarification, README/report wording and the existing option's descriptive UI text. No execution, settlement, connection, consumer, payload, publishing or fixture behavior changed. Final `npm run check` passed build, official lint with zero findings, typecheck and 8 unit tests. A direct comparison against the installed package used by the passing host suites confirmed identical generated connection/consumer/delivery/payload/credential/publisher modules and an identical trigger method; only descriptive UI text differs. Whitespace checks and `npm pack --dry-run --ignore-scripts --json` passed; the package contains 27 distribution/documentation files, without tests or temporary artifacts. Broker/host results are reused for unchanged behavior, not reported as a new run.
 
 ## Not claimed
 
 Other n8n versions, Cloud verification, arbitrary broker versions, production performance, exactly-once external effects and automatic dead-letter handling are not established by these tests. The 2.9.25 fixture is not general compatibility coverage. The create-only action is present in the [nats-server 2.10.0 source](https://github.com/nats-io/nats-server/blob/v2.10.0/server/consumer.go); the version gate protects the approved no-overwrite contract rather than emulating it on older servers.
+
+## Rename verification — n8n-nodes-nats-jetstream
+
+The existing GitHub repository was renamed, not replaced: repository ID `1412479767` and node ID `R_kgDOVDC7Fw` remained unchanged, with default branch `main`. Its new full name is `digows/n8n-nodes-nats-jetstream`; the local clone and origin now use that name. The original commits and measurements above remain history.
+
+Current registrations are `n8n-nodes-nats-jetstream.natsJetstream`, `n8n-nodes-nats-jetstream.natsJetstreamTrigger` and credential `natsJetstreamApi`, exported through `NatsJetstream`, `NatsJetstreamTrigger` and `NatsJetstreamApi`. Source comparison against `c4a86f4` confirmed that runtime changes are only identifier, path and display-name replacements; message, ACK, authentication and consumer behavior is unchanged.
+
+New-name validation used Node 24.21.0, n8n 2.42.3, n8n-workflow 2.42.2, official SDK 3.4.0, nats-server 2.15.1/2.9.25, PostgreSQL 18.4 and Redis 8.10.0:
+
+- `npm run check`: build, official lint with zero findings, typecheck and 8 unit tests passed, zero failures/skips.
+- Package-entry/metadata assertions instantiated all three new classes, checked their registrations and lockfile name, and verified that generated files contained no old class paths. The previous generated `dist` was removed before rebuilding, avoiding stale old-name entries.
+- `npm run test:broker`: 15 passed, zero failures/skips, 22.958 seconds, with new imports and trigger-process fixture identifiers.
+- The built new-name tarball was installed into a fresh isolated community-node directory. `npm run test:host`: 2 mode suites passed, zero failures/skips, 60.354 seconds (regular 21.664 seconds; queue 38.582 seconds). Both new node registrations loaded, the new credential was created/used, and persisted Wait, restart/resume, forced persistence failure, repeated manual execution, cancellation, cleanup, queue backlog and manual deadline cases passed.
+- The first new-name host run passed queue mode but hit SQLite `database is locked` while the test connection created its synthetic failure trigger in regular mode. The fixture now sets a bounded 5,000 ms SQLite busy timeout; the complete rerun above passed without changing package runtime or assertion scope.
+- The fresh fixture's SQLite native dependency initially failed to build with its bundled node-gyp 8.4.1 and Python 3.14.8. Rebuilding that temporary dependency with node-gyp 11.5.0 succeeded under Node 24.21.0; no package/host source patch was made.
+
+These are actual new-name integration/install measurements, not a relabeling of the historical results. The approved manual deadline semantics remain unchanged. No CI, npm publication or runtime deployment was added as part of the rename.
