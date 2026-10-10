@@ -103,4 +103,6 @@ The host suite passes in regular and queue modes, including cancellation, persis
 
 See [the approved specification](docs/specification.md) for authentication, consumer lifecycle, publishing, Wait handling, acknowledgement guarantees, and acceptance tests.
 
+See [CI and npm releases](docs/releases.md) for validation workflows, npm credentials/OIDC setup, SemVer tags and publication. CI does not publish ordinary pushes or pull requests.
+
 Licensed under [MIT](LICENSE).

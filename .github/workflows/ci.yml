@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Build, lint, types, unit and broker tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: checks-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.21.0'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build, lint, typecheck and unit tests
+        run: npm run check
+      - name: Install checksum-pinned NATS test brokers
+        shell: bash
+        run: |
+          set -euo pipefail
+          broker_directory="$(mktemp -d /tmp/nats-ci-XXXXXX)"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/nats-io/nats-server/releases/download/v2.15.1/nats-server-v2.15.1-linux-amd64.tar.gz \
+            --output "$broker_directory/current.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/nats-io/nats-server/releases/download/v2.9.25/nats-server-v2.9.25-linux-amd64.tar.gz \
+            --output "$broker_directory/old.tar.gz"
+          printf '%s  %s\n' \
+            bf5edc7b1ce98e885c368cb43a886eb148dc5d0551d99f3cf6141fb5e1954c70 "$broker_directory/current.tar.gz" \
+            2da5e9ba29ec29a5e44775c1cfe8ade6e3506606b4b361276dfd8a08f273da99 "$broker_directory/old.tar.gz" \
+            | sha256sum --check --strict
+          tar -xzf "$broker_directory/current.tar.gz" -C "$broker_directory"
+          tar -xzf "$broker_directory/old.tar.gz" -C "$broker_directory"
+          npm install --prefix "$broker_directory/jwt" --ignore-scripts --no-audit --no-fund \
+            --package-lock=false @nats-io/jwt@0.0.10-5
+          printf 'NATS_SERVER_BIN=%s\nNATS_OLD_SERVER_BIN=%s\nNATS_JWT_MODULE=%s\n' \
+            "$broker_directory/nats-server-v2.15.1-linux-amd64/nats-server" \
+            "$broker_directory/nats-server-v2.9.25-linux-amd64/nats-server" \
+            "$broker_directory/jwt/node_modules/@nats-io/jwt/cjs/jwt.js" >> "$GITHUB_ENV"
+      - name: Test real broker integration
+        run: npm run test:broker
+      - name: Check npm package contents
+        run: npm pack --dry-run --ignore-scripts
+      - name: Require an unchanged lockfile
+        run: git diff --exit-code -- package.json package-lock.json
