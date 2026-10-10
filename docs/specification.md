@@ -118,6 +118,10 @@ Several processes may share a durable pull consumer. This distributes deliveries
 
 Manual trigger testing receives real broker data through the selected consumer. It must be explicit that testing a production durable consumes its workload and can advance its ACK state. Do not manufacture a test message, create an implicit preview consumer, or silently disable acknowledgement. Stop the manual listener through n8n's documented trigger lifecycle.
 
+On the validated n8n 2.42.3 host, manual close starts immediately after trigger output, before the completion callback. Stop pulls and close the iterator immediately, return the public close promise without waiting for execution completion, and retain only the already-emitted delivery for bounded settlement. The existing `shutdownGraceMs` option is therefore a configurable **manual delivery-settlement deadline**, default **30,000 ms from trigger output**. Success or persisted Wait within that period permits confirmed ACK. Cancellation, failed persistence or deadline expiry releases without success ACK and cleans up the connection and progress timers.
+
+Expiry does not cancel the original downstream execution: it may continue and later succeed while its released message is redelivered, allowing duplicate effects. A later result must not re-acquire or acknowledge that released delivery. This manual-mode limitation is explicitly approved. Automatic executions do not acquire this runtime bound; their grace period starts only on actual trigger shutdown. Use the existing option, not an additional runtime control, and preserve the success/persisted-Wait acknowledgement boundary.
+
 ## Trigger output
 
 One message produces one n8n item and one triggered execution. Use an envelope so headers and metadata cannot collide with payload fields:

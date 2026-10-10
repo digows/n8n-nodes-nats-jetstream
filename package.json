@@ -1,0 +1,35 @@
+{
+  "name": "n8n-nodes-jetstream-nats",
+  "version": "0.1.0",
+  "description": "Durable NATS JetStream trigger and confirmed publisher for n8n",
+  "license": "MIT",
+  "homepage": "https://github.com/digows/n8n-nodes-jetstream-nats",
+  "keywords": ["n8n-community-node-package"],
+  "author": { "name": "Rodrigo P. Fraga", "email": "rodrigo.p.fraga@gmail.com" },
+  "repository": { "type": "git", "url": "https://github.com/digows/n8n-nodes-jetstream-nats.git" },
+  "engines": { "node": ">=24" },
+  "files": ["dist", "README.md", "LICENSE", "docs"],
+  "scripts": {
+    "build": "n8n-node build",
+    "lint": "n8n-node lint",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/unit/*.test.cjs",
+    "test:broker": "node --test --test-concurrency=1 tests/broker/*.test.cjs",
+    "test:host": "node --test --test-concurrency=1 tests/host/*.test.cjs",
+    "check": "npm run build && npm run lint && npm run typecheck && npm test"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": ["dist/credentials/JetstreamNatsApi.credentials.js"],
+    "nodes": ["dist/nodes/JetstreamNats/JetstreamNats.node.js", "dist/nodes/JetstreamNats/JetstreamNatsTrigger.node.js"]
+  },
+  "dependencies": { "@nats-io/jetstream": "3.4.0", "@nats-io/transport-node": "3.4.0" },
+  "peerDependencies": { "n8n-workflow": "*" },
+  "devDependencies": {
+    "@n8n/node-cli": "0.51.4",
+    "@types/node": "24.10.0",
+    "flatted": "3.4.2",
+    "n8n-workflow": "2.42.2",
+    "typescript": "5.9.3"
+  }
+}
