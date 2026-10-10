@@ -79,7 +79,11 @@ export class NatsJetstream implements INodeType
                     else
                     {
                         let value: unknown = this.getNodeParameter(format === 'json' ? 'jsonPayload' : 'textPayload', itemIndex);
-                        if (format === 'json' && typeof value === 'string') value = JSON.parse(value) as unknown;
+                        if (format === 'json' && typeof value === 'string')
+                        {
+                            const rawValue = this.getNodeParameter('jsonPayload', itemIndex, undefined, { rawExpressions: true });
+                            if (typeof rawValue === 'string' && !rawValue.startsWith('=')) value = JSON.parse(value) as unknown;
+                        }
                         data = publishPayload(value, format);
                     }
                     const acknowledgement = await client.publish(subject, data, {

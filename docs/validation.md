@@ -123,3 +123,17 @@ rg --text --no-ignore --hidden -n -i \
 find . -path './node_modules' -prune -o -path './.git' -prune -o -print \
   | rg -i 'jetstream[ _-]?nats'
 ```
+
+## Publisher expression value correction
+
+The publisher execution regression suite uses the exported `Workflow` and its real public expression evaluator from n8n-workflow 2.42.2. Only connection creation and the SDK publish boundary are mocked; expressions are not replaced with canned resolved values. On the previous runtime (`29c5b08e13b47146828905fedee1532f05e40b75`), `node --test tests/unit/publisher.test.cjs` passed 4 tests and failed 2 expression-string tests, including rejection of `hello` as invalid JSON. After the bounded correction, all 6 publisher tests pass.
+
+The publisher reads `jsonPayload` through public `getNodeParameter(..., { rawExpressions: true })` only when the resolved JSON value is a string. It parses fixed JSON editor text, but preserves an expression-result string. There is no new setting, private core import or change to authentication, ACK, Wait or consumer behavior.
+
+The corrected tree was measured locally with Node 24.21.0, npm 11.19.0, n8n-workflow 2.42.2, official node CLI 0.51.4 and NATS SDK 3.4.0:
+
+- `npm run check`: official build/lint with zero findings, types and 18 unit tests passed, zero failures/skips.
+- Publisher execution tests cover per-item string values including JSON-looking strings, direct string expressions, native number/boolean/null/object/array expressions, fixed JSON text, invalid fixed JSON, item pairing, connection closure, UTF-8 text and the binary helper. Captured publication bytes are compared exactly, detecting type coercion and double serialization.
+- `npm run test:broker`: 15 passed, zero failures/skips, 17.588 seconds, using checksum-verified native NATS 2.15.1 and 2.9.25 and official JWT fixture 0.0.10-5. This is a fresh broker run for the correction, not a reused historical result.
+
+The actual n8n regular/queue host suite was not rerun for this correction. These measurements do not establish behavior on the proposed n8n 2.42.6 image; its build, registration and devops rollout validation are a separate authorized follow-up. No image, manifest, release tag, npm publication or deployment was changed by this package correction.

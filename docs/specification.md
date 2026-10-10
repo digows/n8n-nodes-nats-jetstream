@@ -154,7 +154,7 @@ No connection handles, ACK callbacks, credential data, or private seeds may appe
 
 Required: credential, literal subject, and payload format (`JSON`, `Text`, or `Binary`). Support expression-based subject and payload values per input item. Publishing subjects cannot contain subscription wildcards.
 
-JSON is serialized exactly once. Text is encoded as UTF-8. Binary reads the selected input binary property using n8n's binary helper, not an assumed in-memory base64 layout.
+Fixed JSON editor text is parsed as JSON. Expressions provide already evaluated values: preserve their string, number, boolean, null, object or array type without parsing expression-result strings again. For example, `={{ "123" }}` publishes the JSON string `"123"`, not the number `123`; `={{ "hello" }}` is valid. Expressions returning serialized JSON text publish a string unless the caller explicitly parses it in the expression. Serialize the resulting JSON value exactly once. Text is encoded as UTF-8. Binary reads the selected input binary property using n8n's binary helper, not an assumed in-memory base64 layout.
 
 Optional settings: headers, stable message ID, expected stream, and publish timeout. Preserve repeated headers. If a dedicated parameter conflicts with a reserved header such as `Nats-Msg-Id`, fail clearly instead of silently overriding either value.
 

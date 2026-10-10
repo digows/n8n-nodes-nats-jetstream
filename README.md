@@ -49,7 +49,7 @@ JSON/Text trigger output is `{ "payload": ..., "metadata": ... }`. JSON objects,
 
 Binary output uses n8n's `binary.data` helper and metadata in `json`; it does not put bytes/base64 in `json.payload`. Select Text or Binary if normal JavaScript JSON-number semantics do not preserve the representation you need. Unsafe SDK numeric sequences are rejected rather than emitted after rounding.
 
-Publisher subjects are literal NATS subjects and may be expressions per item; subscription wildcards are invalid. JSON parameters accept a JSON value or JSON text and serialize it once. Text is UTF-8. Binary uses the selected input binary field through n8n's helper, including external binary storage.
+Publisher subjects are literal NATS subjects and may be expressions per item; subscription wildcards are invalid. Fixed JSON editor text is parsed before serialization. Expressions provide evaluated JSON values and preserve their types: `={{ "123" }}` publishes a JSON string, not a number, and `={{ "hello" }}` is valid. An expression returning serialized JSON text still returns a string; return an object/array or explicitly parse that text in the expression to publish its contents as JSON. The resulting value is serialized exactly once. Text is UTF-8. Binary uses the selected input binary field through n8n's helper, including external binary storage.
 
 Optional headers accept strings or string arrays. Dedicated message ID/expected stream values must not conflict with their reserved headers. Reuse a caller-supplied stable message ID on retries; publication deduplication lasts only within the stream's configured duplicate window. No automatic payload hash or random retry ID is generated.
 
