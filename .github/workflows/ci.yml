@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
   workflow_call:
 
 permissions:
@@ -61,3 +62,80 @@ jobs:
         run: npm pack --dry-run --ignore-scripts
       - name: Require an unchanged lockfile
         run: git diff --exit-code -- package.json package-lock.json
+
+  host:
+    name: n8n 2.42.6 regular and queue lifecycle
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.21.0'
+      - name: Prepare isolated temporary fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d /Volumes/Files/.tmp && -w /Volumes/Files/.tmp ]]; then
+            fixture_directory="$(mktemp -d /Volumes/Files/.tmp/jetstream-host-ci-XXXXXX)"
+          else
+            echo '::notice::/Volumes/Files/.tmp is unavailable on this Linux runner; using an explicitly authorized isolated RUNNER_TEMP directory.'
+            fixture_directory="$(mktemp -d "$RUNNER_TEMP/jetstream-host-ci-XXXXXX")"
+          fi
+          printf 'TMPDIR=%s\nnpm_config_cache=%s\n' \
+            "$fixture_directory" "$fixture_directory/npm-cache" >> "$GITHUB_ENV"
+      - name: Build the candidate package
+        run: |
+          npm ci
+          npm run build
+          npm pack --ignore-scripts --pack-destination "$TMPDIR"
+          sha256sum "$TMPDIR"/n8n-nodes-nats-jetstream-*.tgz
+      - name: Install pinned native NATS and Redis fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/nats-io/nats-server/releases/download/v2.14.6/nats-server-v2.14.6-linux-amd64.tar.gz \
+            --output "$TMPDIR/nats.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://download.redis.io/releases/redis-8.10.0.tar.gz \
+            --output "$TMPDIR/redis.tar.gz"
+          printf '%s  %s\n' \
+            61c3d55f69f61ec616b75782250936445f2819e9e5f2ae6159b10a31abd2200c "$TMPDIR/nats.tar.gz" \
+            f1baa4b28befd417aa6577ebeedde9e9fc7814cfcc299b2a6d2fd99ef7420a6c "$TMPDIR/redis.tar.gz" \
+            | sha256sum --check --strict
+          tar -xzf "$TMPDIR/nats.tar.gz" -C "$TMPDIR"
+          tar -xzf "$TMPDIR/redis.tar.gz" -C "$TMPDIR"
+          make -C "$TMPDIR/redis-8.10.0/src" -j2 MALLOC=libc OPTIMIZATION=-O2 redis-server
+          "$TMPDIR/nats-server-v2.14.6-linux-amd64/nats-server" --version
+          "$TMPDIR/redis-8.10.0/src/redis-server" --version
+          printf 'NATS_SERVER_BIN=%s\nREDIS_SERVER_BIN=%s\n' \
+            "$TMPDIR/nats-server-v2.14.6-linux-amd64/nats-server" \
+            "$TMPDIR/redis-8.10.0/src/redis-server" >> "$GITHUB_ENV"
+      - name: Install isolated n8n and PostgreSQL fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix "$TMPDIR/host" --no-audit --no-fund --package-lock=false \
+            n8n@2.42.6 embedded-postgres@18.4.0-beta.17 @embedded-postgres/linux-x64@18.4.0-beta.17
+          host_workflow_version="$(node -p "require('$TMPDIR/host/node_modules/n8n/package.json').dependencies['n8n-workflow']")"
+          test "$(node -p "require('$TMPDIR/host/node_modules/n8n/package.json').version")" = 2.42.6
+          npm install --prefix "$TMPDIR/community" --ignore-scripts --no-audit --no-fund --package-lock=false \
+            "$TMPDIR"/n8n-nodes-nats-jetstream-*.tgz "n8n-workflow@$host_workflow_version"
+          printf 'N8N_TEST_CLI=%s\nN8N_TEST_HOST_VERSION=2.42.6\nN8N_TEST_NODES_DIRECTORY=%s\nEMBEDDED_POSTGRES_MODULE=%s\n' \
+            "$TMPDIR/host/node_modules/n8n/bin/n8n" \
+            "$TMPDIR/community" \
+            "$TMPDIR/host/node_modules/embedded-postgres/dist/index.js" >> "$GITHUB_ENV"
+      - name: Test actual regular and queue host lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm run test:host | tee "$TMPDIR/host-tests.log"
+      - name: Require unchanged package sources
+        run: git diff --exit-code
