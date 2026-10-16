@@ -394,6 +394,14 @@ for (const mode of ['regular', 'queue'])
             await assertCleanup();
             assert.equal((await manager.consumers.info('HOST', 'manual-batch')).num_pending, 1);
             suite.diagnostic('Native manual batch consumes one execution only and leaves later messages pending');
+            if (process.env.N8N_WORKFLOW_QUALIFIER)
+            {
+                await require(process.env.N8N_WORKFLOW_QUALIFIER)({
+                    request: instance.request, executions, until,
+                    diagnostic: message => suite.diagnostic(message),
+                    decodeData: data => typeof data === 'string' ? parse(data) : data,
+                });
+            }
         }
         catch (error)
         {
