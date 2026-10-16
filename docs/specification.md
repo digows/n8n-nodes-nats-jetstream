@@ -73,6 +73,8 @@ Two consumer modes:
 
 Creation settings are subject filters, delivery policy (`New` by default, or `All` when selected), `AckWait`, `MaxDeliver`, and `MaxAckPending`. Use `AckExplicit`. Expose durations in milliseconds or seconds with explicit units and convert to SDK/server units at the boundary.
 
+`MaxAckPending` defaults to `1000`. Accept `-1` for unlimited pending acknowledgements across the durable consumer, or a positive safe integer for a finite limit; reject zero and other invalid values. This is independent of the local maximum in-flight setting, which remains positive and defaults to `1` per trigger instance. Omitting the creation setting retains `1000`, not unlimited. Existing-consumer mismatch detection and the no-update contract remain unchanged.
+
 Use the SDK's create-only consumer operation. When another activation wins the creation race, re-read and compare the consumer. Authorization errors, invalid configuration, and connectivity failures are not evidence that a consumer is missing.
 
 An existing consumer must be durable, pull-based, and use explicit acknowledgements. Incompatible push, ordered, or `AckAll`/`AckNone` consumers must fail activation with an actionable message. No consumer is deleted or recreated on activation, deactivation, or deployment.

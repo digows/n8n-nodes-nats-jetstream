@@ -16,6 +16,8 @@ export function creationConfiguration(durable: string, options: Record<string, u
     const filters = typeof options.subjectFilters === 'string' ? options.subjectFilters.split(/[\s,]+/).filter(Boolean) : [];
     const maxDeliver = options.maxDeliver ?? 10;
     if (maxDeliver !== -1) positiveInteger(maxDeliver, 'Max deliver');
+    const maxAckPending = options.maxAckPending ?? 1000;
+    if (maxAckPending !== -1) positiveInteger(maxAckPending, 'Max ack pending');
     const ackWaitMs = positiveInteger(options.ackWaitMs ?? 30000, 'Ack wait');
     if (!Number.isSafeInteger(ackWaitMs * 1000000)) throw new Error('Ack wait exceeds the supported duration');
     return {
@@ -24,7 +26,7 @@ export function creationConfiguration(durable: string, options: Record<string, u
         deliver_policy: options.deliverPolicy === 'all' ? DeliverPolicy.All : DeliverPolicy.New,
         ack_wait: ackWaitMs * 1000000,
         max_deliver: maxDeliver as number,
-        max_ack_pending: positiveInteger(options.maxAckPending ?? 1000, 'Max ack pending'),
+        max_ack_pending: maxAckPending as number,
         ...(filters.length === 1 ? { filter_subject: filters[0] } : filters.length > 1 ? { filter_subjects: filters } : {}),
     };
 }

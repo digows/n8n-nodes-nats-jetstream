@@ -5,6 +5,7 @@ const { connectionOptions } = require('../../dist/lib/connection');
 const { creationConfiguration, validateConsumer, progressInterval } = require('../../dist/lib/consumer');
 const { messageItem, publishHeaders, publishPayload, publishSubject, sequenceString } = require('../../dist/lib/payload');
 const { completedBoundary, deliverMessage } = require('../../dist/lib/delivery');
+const { NatsJetstreamTrigger } = require('../../dist/nodes/NatsJetstream/NatsJetstreamTrigger.node');
 
 function run(status, error)
 {
@@ -65,6 +66,38 @@ test('consumer validation and BackOff deadline', () =>
     assert.throws(() => validateConsumer({ config: { ...configuration, deliver_subject: 'push' } }, { durable: 'handler', mode: 'existing' }));
     assert.throws(() => validateConsumer({ config: { ...configuration, max_deliver: 11 } }, { durable: 'handler', mode: 'create', configuration }), /not modified/);
     assert.equal(progressInterval({ config: { ack_wait: 900000000, backoff: [300000000, 600000000] } }), 100);
+});
+
+test('max ack pending accepts unlimited or positive safe integers without changing defaults', () =>
+{
+    assert.equal(creationConfiguration('handler', {}).max_ack_pending, 1000);
+    for (const maxAckPending of [-1, 1, 1000, Number.MAX_SAFE_INTEGER])
+    {
+        const configuration = creationConfiguration('handler', { maxAckPending });
+        assert.equal(configuration.max_ack_pending, maxAckPending);
+        validateConsumer({ config: configuration }, { durable: 'handler', mode: 'create', configuration });
+    }
+    for (const maxAckPending of [0, -2, -0.5, 0.5, 1.5, NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1, '1', '-1', false])
+    {
+        assert.throws(() => creationConfiguration('handler', { maxAckPending }), /Max ack pending/);
+    }
+    const configuration = creationConfiguration('handler', { maxAckPending: -1 });
+    assert.throws(() => validateConsumer({ config: { ...configuration, max_ack_pending: 1000 } },
+        { durable: 'handler', mode: 'create', configuration }), /max_ack_pending.*not modified/);
+});
+
+test('max ack pending UI exposes unlimited without changing local in-flight defaults', () =>
+{
+    const properties = new NatsJetstreamTrigger().description.properties;
+    const creation = properties.find(property => property.name === 'creation');
+    const maxAckPending = creation.options.find(property => property.name === 'maxAckPending');
+    assert.equal(maxAckPending.default, 1000);
+    assert.equal(maxAckPending.typeOptions.minValue, -1);
+    assert.match(maxAckPending.description, /-1 means unlimited/);
+    const options = properties.find(property => property.name === 'options');
+    const maxInFlight = options.options.find(property => property.name === 'maxInFlight');
+    assert.equal(maxInFlight.default, 1);
+    assert.equal(maxInFlight.typeOptions.minValue, 1);
 });
 
 test('payload envelope supports scalar JSON, repeated headers and binary helpers', async () =>

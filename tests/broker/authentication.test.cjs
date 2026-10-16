@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const { execFileSync } = require('node:child_process');
 const { mkdtemp, writeFile, readFile, rm } = require('node:fs/promises');
 const { join } = require('node:path');
+const { tmpdir } = require('node:os');
 const { nkeys, connect } = require('@nats-io/transport-node');
 const { jetstreamManager, AckPolicy, StorageType } = require('@nats-io/jetstream');
 const { broker } = require('../helpers.cjs');
@@ -34,7 +35,7 @@ test('complete .creds authenticates against an operator/JWT server', async () =>
 {
     assert.ok(process.env.NATS_JWT_MODULE, 'Set NATS_JWT_MODULE to the official @nats-io/jwt package entry');
     const jwt = require(process.env.NATS_JWT_MODULE);
-    const directory = await mkdtemp(join('/tmp', 'jetstream-jwt-'));
+    const directory = await mkdtemp(join(tmpdir(), 'jetstream-jwt-'));
     const operator = jwt.createOperator(), account = jwt.createAccount(), user = jwt.createUser(), systemAccount = jwt.createAccount();
     let server;
     try
@@ -63,7 +64,7 @@ test('complete .creds authenticates against an operator/JWT server', async () =>
 
 test('TLS verifies the server CA and supports client certificates without insecure fallback', async () =>
 {
-    const directory = await mkdtemp(join('/tmp', 'jetstream-tls-'));
+    const directory = await mkdtemp(join(tmpdir(), 'jetstream-tls-'));
     const certificatePath = join(directory, 'certificate.pem'), keyPath = join(directory, 'key.pem');
     let server;
     try

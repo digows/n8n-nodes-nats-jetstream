@@ -84,6 +84,8 @@ Create the stream outside this package. **Bind Existing** is the default consume
 
 **Create If Missing** explicitly permits creation. Configure subject filters, New/All delivery policy, ACK wait in milliseconds, maximum delivery attempts and maximum pending acknowledgements. An existing consumer must match these settings; incompatible configuration fails without updating it. Concurrent creation is followed by a fresh compatibility check. No consumer is deleted on shutdown.
 
+The `0.1.1` source adds **Max Ack Pending** support for `-1` (unlimited pending acknowledgements across the durable consumer); positive safe integers remain valid and the default remains `1000`. This does not disable the local **Maximum In-Flight Messages** bound, which still defaults to `1` per trigger instance. Changing creation settings does not update an existing durable: update it separately or keep matching settings. One broker message still produces one n8n execution; concurrent processing does not guarantee ordered business effects.
+
 One or multiple subject filters are evaluated by the broker, not against JSON values. Creation requires nats-server 2.10 or newer: older servers do not enforce the create-only action. Bind Existing does not create/update a consumer. Servers without multiple-filter support fail explicitly. Replicas sharing a durable distribute messages; separate consumers follow the stream's retention policy. Work-queue retention is not a fan-out guarantee.
 
 The local in-flight limit includes fetched messages, queued executions, running workflows and unconfirmed ACKs. Pulls are bounded by remaining capacity. Progress notifications keep messages alive while healthy processing takes longer than ACK wait, including consumers configured with BackOff.
@@ -156,7 +158,7 @@ NATS_SERVER_BIN=/absolute/path/to/nats-server-2.15.1 \
 npm run test:host
 ```
 
-The host suite passes in regular and queue modes, including cancellation, persisted Wait, persistence rejection and processing beyond the approved manual grace period. Tests create disposable data under `/tmp` and never use production brokers or credentials. Use `npm pack --ignore-scripts --pack-destination /tmp/<task-directory>` to build an installation artifact; this does not publish to npm or deploy a runtime.
+The host suite passes in regular and queue modes, including cancellation, persisted Wait, persistence rejection and processing beyond the approved manual grace period. Broker fixtures honor `TMPDIR`; host fixtures currently create disposable data under `/tmp`. Neither uses production brokers or credentials. Use `npm pack --ignore-scripts --pack-destination /tmp/<task-directory>` to build an installation artifact; this does not publish to npm or deploy a runtime.
 
 See [the approved specification](docs/specification.md) for authentication, consumer lifecycle, publishing, Wait handling, acknowledgement guarantees, and acceptance tests.
 

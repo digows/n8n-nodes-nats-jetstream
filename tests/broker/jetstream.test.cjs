@@ -88,6 +88,59 @@ test('real JetStream creation, consumption and publishing', async suite =>
             }
             finally { await response.closeFunction(); }
         });
+        await suite.test('unlimited broker pending preserves local bounds and independent completion ACKs', async () =>
+        {
+            const parameters = {
+                stream: 'TESTS', durable: 'unlimited', consumerMode: 'create',
+                creation: { subjectFilters: 'tests.unlimited', ackWaitMs: 150, maxAckPending: -1 },
+                payloadFormat: 'json', options: { maxInFlight: 2, pullTimeoutMs: 1000, shutdownGraceMs: 1000 },
+            };
+            const pending = [];
+            const context = triggerContext(credential, parameters, (items, _response, completion) =>
+            {
+                assert.equal(items.length, 1);
+                assert.equal(items[0].length, 1);
+                pending.push({ item: items[0][0], completion });
+            });
+            const response = await NatsJetstreamTrigger.prototype.trigger.call(context);
+            try
+            {
+                const original = await manager.consumers.info('TESTS', 'unlimited');
+                assert.equal(original.config.max_ack_pending, -1);
+                const selection = { stream: 'TESTS', durable: 'unlimited', mode: 'create', configuration: creationConfiguration('unlimited', parameters.creation) };
+                await bindConsumer(connection, selection);
+                await assert.rejects(bindConsumer(connection, { ...selection, configuration: { ...selection.configuration, max_ack_pending: 1000 } }), /max_ack_pending.*not modified/);
+                const unchanged = await manager.consumers.info('TESTS', 'unlimited');
+                assert.equal(unchanged.config.max_ack_pending, -1);
+                assert.equal(unchanged.created, original.created);
+                assert.deepEqual(unchanged.delivered, original.delivered);
+                assert.deepEqual(unchanged.ack_floor, original.ack_floor);
+
+                for (let index = 0; index < 3; index++) await client.publish('tests.unlimited', Buffer.from(JSON.stringify({ index })));
+                await until(() => pending.length === 2);
+                await new Promise(resolve => setTimeout(resolve, 450));
+                const busy = await manager.consumers.info('TESTS', 'unlimited');
+                assert.equal(busy.num_ack_pending, 2);
+                assert.equal(busy.num_pending, 1);
+                assert.equal(busy.num_redelivered, 0);
+                assert.equal(pending.length, 2);
+
+                pending[1].completion.resolve(run('success'));
+                await until(() => pending.length === 3);
+                assert.deepEqual(pending.map(delivery => delivery.item.json.payload.index), [0, 1, 2]);
+                pending[2].completion.resolve(run('waiting'));
+                await until(async () => (await manager.consumers.info('TESTS', 'unlimited')).num_ack_pending === 1);
+                pending[0].completion.resolve(run('success'));
+                await until(async () =>
+                {
+                    const settled = await manager.consumers.info('TESTS', 'unlimited');
+                    return settled.num_ack_pending === 0 && settled.num_pending === 0;
+                });
+                assert.deepEqual(context.fatal, []);
+                assert.deepEqual(context.failures, []);
+            }
+            finally { await response.closeFunction(); }
+        });
         await suite.test('failed execution redelivers after delayed NAK', async () =>
         {
             let deliveries = 0;

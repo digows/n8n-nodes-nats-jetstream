@@ -22,7 +22,7 @@ export class NatsJetstreamTrigger implements INodeType
             { displayName: 'Creation Settings', name: 'creation', type: 'collection', placeholder: 'Add Setting', default: {}, displayOptions: { show: { consumerMode: ['create'] } }, options: [
                 { displayName: 'Ack Wait (Ms)', name: 'ackWaitMs', type: 'number', default: 30000, typeOptions: { minValue: 1 } },
                 { displayName: 'Delivery Policy', name: 'deliverPolicy', type: 'options', default: 'new', options: [{ name: 'New', value: 'new' }, { name: 'All', value: 'all' }] },
-                { displayName: 'Max Ack Pending', name: 'maxAckPending', type: 'number', default: 1000, typeOptions: { minValue: 1 } },
+                { displayName: 'Max Ack Pending', name: 'maxAckPending', type: 'number', default: 1000, typeOptions: { minValue: -1 }, description: 'Maximum pending acknowledgements across the durable consumer; -1 means unlimited. The local in-flight limit still applies.' },
                 { displayName: 'Max Deliver', name: 'maxDeliver', type: 'number', default: 10, description: 'Maximum delivery attempts; -1 means unlimited' },
                 { displayName: 'Subject Filters', name: 'subjectFilters', type: 'string', default: '', description: 'Comma- or whitespace-separated subject filters; empty selects all subjects in the stream' },
             ] },

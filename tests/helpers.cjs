@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const { mkdtemp, writeFile, rm } = require('node:fs/promises');
 const { join } = require('node:path');
+const { tmpdir } = require('node:os');
 const { createServer } = require('node:net');
 
 async function port()
@@ -28,7 +29,7 @@ async function until(predicate, milliseconds = 10000)
 async function broker(configuration = '', binary = process.env.NATS_SERVER_BIN)
 {
     assert.ok(binary, 'Set NATS_SERVER_BIN to a test nats-server binary');
-    const directory = await mkdtemp(join('/tmp', 'jetstream-broker-'));
+    const directory = await mkdtemp(join(tmpdir(), 'jetstream-broker-'));
     const serverPort = await port();
     const monitoringPort = await port();
     const configurationPath = join(directory, 'server.conf');

@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-nats-jetstream",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "NATS JetStream community nodes for n8n: durable pull consumer trigger, confirmed JSON/text/binary publishing, native authentication and verified TLS",
   "license": "MIT",
   "homepage": "https://github.com/digows/n8n-nodes-nats-jetstream",
