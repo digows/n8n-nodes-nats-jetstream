@@ -6,12 +6,13 @@
 
 **Connect self-hosted n8n workflows to NATS JetStream with durable message consumption and confirmed publishing.** `n8n-nodes-nats-jetstream` is an open-source TypeScript community node package for event-driven workflow automation, using the official NATS JavaScript SDK.
 
-Use it to trigger workflows from broker subjects, distribute work across a shared durable consumer, or publish JSON, text and binary messages to a JetStream stream. Version [0.1.0 is available on npm](https://www.npmjs.com/package/n8n-nodes-nats-jetstream/v/0.1.0). This is an **unverified community package for self-hosted n8n**, not an n8n Cloud verified integration.
+Use it to trigger workflows from broker subjects, distribute work across a shared durable consumer, or publish JSON, text and binary messages to a JetStream stream. Version [0.1.1 is available on npm](https://www.npmjs.com/package/n8n-nodes-nats-jetstream/v/0.1.1); this source targets 0.1.2. This is an **unverified community package for self-hosted n8n**, not an n8n Cloud verified integration.
 
 ## Features
 
 - Durable pull consumer trigger with broker-side subject filters and bounded in-flight delivery.
 - Confirmed consumer acknowledgements after workflow success or a persisted n8n Wait handoff, not merely after emitting a message.
+- Optional batches of individual message items in one execution, with a configurable terminal execution-error policy.
 - JSON, UTF-8 text and binary publishing with broker acknowledgements, headers and caller-supplied message IDs.
 - Native NATS username/password, token, NKey and `.creds` authentication.
 - Verified TLS, custom certificate authorities and mutual TLS (mTLS).
@@ -28,7 +29,7 @@ Prerequisites: self-hosted n8n, Node.js 24 or newer, a reachable NATS server wit
 As an n8n Owner or Admin:
 
 1. Open **Settings → Community Nodes → Install**.
-2. Enter `n8n-nodes-nats-jetstream@0.1.0` to select the published version explicitly.
+2. Enter `n8n-nodes-nats-jetstream@0.1.1` to select the published version explicitly.
 3. Review the community-node risks and select **Install**.
 4. Find **NATS JetStream Trigger** and **NATS JetStream** in the node picker.
 
@@ -63,7 +64,7 @@ The subject must match an existing stream. The node returns the broker's `stream
 
 ## Nodes
 
-- **NATS JetStream Trigger** consumes a named durable pull consumer. A message is acknowledged only after the parent workflow succeeds or n8n persists a resumable Wait execution.
+- **NATS JetStream Trigger** consumes a named durable pull consumer. By default, a message is acknowledged only after the parent workflow succeeds or n8n persists a resumable Wait execution. Optional terminal-error acknowledgement is described below.
 - **NATS JetStream** publishes JSON, UTF-8 text or an input binary field, waits for the broker's publication acknowledgement, and returns one paired result per input item.
 
 The package uses the official NATS SDK 3.4.0. No application-specific routing, automatic dead-letter queue, broker deployment or stream administration is included. Core NATS subscriptions, business request/reply services, KV and Object Store are outside this package's scope.
@@ -84,15 +85,25 @@ Create the stream outside this package. **Bind Existing** is the default consume
 
 **Create If Missing** explicitly permits creation. Configure subject filters, New/All delivery policy, ACK wait in milliseconds, maximum delivery attempts and maximum pending acknowledgements. An existing consumer must match these settings; incompatible configuration fails without updating it. Concurrent creation is followed by a fresh compatibility check. No consumer is deleted on shutdown.
 
-The `0.1.1` source adds **Max Ack Pending** support for `-1` (unlimited pending acknowledgements across the durable consumer); positive safe integers remain valid and the default remains `1000`. This does not disable the local **Maximum In-Flight Messages** bound, which still defaults to `1` per trigger instance. Changing creation settings does not update an existing durable: update it separately or keep matching settings. One broker message still produces one n8n execution; concurrent processing does not guarantee ordered business effects.
+Since `0.1.1`, **Max Ack Pending** supports `-1` (unlimited pending acknowledgements across the durable consumer); positive safe integers remain valid and the default remains `1000`. This does not disable the local **Maximum In-Flight Messages** bound, which still defaults to `1` per trigger instance. Changing creation settings does not update an existing durable: update it separately or keep matching settings. Default consumption produces one n8n execution per broker message; concurrent processing does not guarantee ordered business effects.
 
 One or multiple subject filters are evaluated by the broker, not against JSON values. Creation requires nats-server 2.10 or newer: older servers do not enforce the create-only action. Bind Existing does not create/update a consumer. Servers without multiple-filter support fail explicitly. Replicas sharing a durable distribute messages; separate consumers follow the stream's retention policy. Work-queue retention is not a fan-out guarantee.
 
 The local in-flight limit includes fetched messages, queued executions, running workflows and unconfirmed ACKs. Pulls are bounded by remaining capacity. Progress notifications keep messages alive while healthy processing takes longer than ACK wait, including consumers configured with BackOff.
 
+### Batches (0.1.2 source)
+
+Set **Options → Batch Size** (`options.batchSize`) above its default `1` to emit up to N individual items in one execution. **Maximum In-Flight Messages** must be at least N; it still counts messages, not executions or batches. Only one batch executes at a time, even if additional capacity is configured.
+
+The existing **Pull Timeout** bounds collection. A partial nonempty batch emits at timeout; an empty pull emits nothing and keeps listening. Fetched messages receive progress notifications while collection, execution and confirmation are pending. Text preserves the original UTF-8 payload representation; each item retains its own metadata and pairing. Binary uses the existing n8n helper per message.
+
+The batch shares one workflow outcome, not an application-level per-item ACK protocol. Use native n8n node RetryOnFail and intentional per-item continuation where needed. This package does not retry individual nodes or decide which HTTP/business errors are terminal. Delayed broker redelivery, restarts and overlapping subscribers can change delivery order: batching does not promise strict FIFO or atomic multi-message ACKs.
+
 ## Completion and redelivery
 
 `emit()` and queue admission do not acknowledge a message. Successful parent execution or persisted Wait handoff leads to `ackAck()` with confirmation. Failed admission/execution, unknown results and cancellation release the message through delayed NAK when connected, or leave it unacknowledged when disconnected.
+
+**Options → On Execution Error** (`options.onExecutionError`) defaults to `redeliver`. Optional `acknowledge` confirms messages after a recognized, normally completed node failure while leaving the original n8n execution **failed**. Recognition requires a terminal timestamp and matching top-level/last-failed-node error evidence in the public completion result; `status=error` alone never qualifies. Failed admission, unrecognized infrastructure/persistence errors, rejected/missing results, cancellation, crashes and unfinished shutdown still do not ACK. No payload, HTTP status or application-specific error classification is used. Target-host qualification for this new policy is separate from the historical 0.1.0/0.1.1 results in [validation evidence](docs/validation.md).
 
 After a persisted Wait handoff, n8n owns the resumable execution. Restart/resume does not require an in-memory trigger callback. Later failure follows n8n's error handling, not NATS redelivery.
 
@@ -147,10 +158,11 @@ NATS_JWT_MODULE=/absolute/path/to/@nats-io/jwt/cjs/jwt.js \
 npm run test:broker
 ```
 
-Actual host tests require an isolated n8n 2.42.3 installation, the built package installed in its community-node directory, embedded-postgres and redis-server:
+Actual host tests require an isolated target n8n installation, the built package installed in its community-node directory, embedded-postgres and redis-server. Set `N8N_TEST_HOST_VERSION` to label the tested host version (default historical target `2.42.3`):
 
 ```sh
 N8N_TEST_CLI=/absolute/path/to/n8n/bin/n8n \
+N8N_TEST_HOST_VERSION=2.42.6 \
 N8N_TEST_NODES_DIRECTORY=/absolute/path/to/community/nodes \
 EMBEDDED_POSTGRES_MODULE=/absolute/path/to/embedded-postgres/dist/index.js \
 REDIS_SERVER_BIN=/absolute/path/to/redis-server \
@@ -158,7 +170,9 @@ NATS_SERVER_BIN=/absolute/path/to/nats-server-2.15.1 \
 npm run test:host
 ```
 
-The host suite passes in regular and queue modes, including cancellation, persisted Wait, persistence rejection and processing beyond the approved manual grace period. Broker fixtures honor `TMPDIR`; host fixtures currently create disposable data under `/tmp`. Neither uses production brokers or credentials. Use `npm pack --ignore-scripts --pack-destination /tmp/<task-directory>` to build an installation artifact; this does not publish to npm or deploy a runtime.
+The historical host suite passed in regular and queue modes, including cancellation, persisted Wait, persistence rejection and processing beyond the approved manual grace period. The 0.1.2 host extensions add terminal node errors versus admission/save faults, native RetryOnFail and batch/manual behavior; do not infer their results from historical tests. Broker and host fixtures honor `TMPDIR`. Neither uses production brokers or credentials. Use `npm pack --ignore-scripts --pack-destination "$TMPDIR"` with a task-specific temporary directory to build an installation artifact; this does not publish to npm or deploy a runtime.
+
+For a synthetic completion benchmark against a real broker, run `NATS_SERVER_BIN=/absolute/path/to/nats-server node tests/bench/batch.cjs`. It measures a public-interface completion adapter with fixed per-execution delay, not actual n8n worker throughput. It reports execution count, elapsed throughput and message completion latency for serial single, concurrent single and serial batch modes.
 
 See [the approved specification](docs/specification.md) for authentication, consumer lifecycle, publishing, Wait handling, acknowledgement guarantees, and acceptance tests.
 

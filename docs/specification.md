@@ -83,17 +83,30 @@ Subject filtering is server-side. One or multiple filters select messages by sub
 
 Runtime controls are local maximum in-flight messages, pull timeout, delayed-NAK interval, acknowledgement timeout, and shutdown grace period. Keep the normal UI small; advanced settings belong in an options collection. Do not expose every SDK setting by default.
 
+### Opt-in batching and execution-error policy (0.1.2)
+
+`options.batchSize` is a positive safe integer, default `1`. The default preserves one message per execution and existing single-message concurrency. A value greater than one collects up to that many messages, emits them as separate items in **one** execution, and waits for that execution and its settlements before starting another batch. There is no concurrent second batch, even when unused message capacity remains.
+
+`options.maxInFlight` remains a finite **message** budget, not a batch count. `batchSize` must fit that budget. Collection uses the existing bounded `pullTimeoutMs`: an incomplete nonempty batch is emitted when the pull expires; an empty pull does not emit an execution or stop a manual listener. Progress starts as each message is fetched, including time spent collecting the rest of the batch. Preserve raw Text, Binary, per-message metadata, received order and item pairing. Do not split, merge or reinterpret application payloads.
+
+`options.onExecutionError` is `redeliver` by default, preserving existing failed-execution behavior. Optional `acknowledge` treats an evidenced, normally completed node failure as terminal for transport; it does **not** turn the failed n8n run into success. A resolved promise or `status=error` alone is insufficient: require a valid terminal timestamp and matching top-level/last-failed-node error evidence in the public `IRun`. Rejected admission, persistence/infrastructure errors without that evidence, missing/unknown results, cancellation, crash and unfinished shutdown remain recoverable. Qualification must exercise normal node failure versus admission and persistence faults in the actual target host; no private-core, database or API dependency belongs in the runtime library.
+
+All items share one execution outcome. Confirm eligible message ACKs individually; a batch is not an atomic broker transaction. An uncertain ACK is not NAKed, and does not prevent attempting the other eligible ACKs. Conversion/admission failures never qualify for terminal-error ACK. The application owns native n8n node retries and per-item continuation so one failed item need not prevent processing the rest. Do not add a custom retry engine, per-item outcome protocol, manual ACK node, HTTP/business-error classifier or listener-stop-on-business-error policy.
+
+Received batch order does not guarantee strict FIFO across delayed redelivery, restart or overlapping subscribers. The broker can deliver fresh messages before a NAKed batch returns, and overlapping subscribers can receive other batches. No router, partitioning service, additional stream, KV, checkpoint store or database/CDC change is part of this extension.
+
 ## Acknowledgement and n8n Wait contract
 
 The approved completion boundary is **successful execution or persisted Wait handoff**. It is not merely receiving a message, calling `emit()`, or enqueuing an n8n execution.
 
-For each message, create an n8n deferred completion promise and emit one item with `ITriggerFunctions.emit(data, undefined, donePromise)`. Inspect the resolved `IRun`, including status and error state. Promise resolution by itself is not success.
+For each execution, create an n8n deferred completion promise and emit its message item or batch items with `ITriggerFunctions.emit(data, undefined, donePromise)`. Inspect the resolved `IRun`, including status and error state. Promise resolution by itself is not success.
 
 | Observed outcome | Message treatment |
 | --- | --- |
 | `success`, without an execution error | Confirmed ACK. |
 | `waiting`, without an execution error, after n8n persists the resumable execution | Confirmed ACK: ownership transfers to n8n. |
-| Failed execution or failure to start/enqueue | Delayed NAK when connected; otherwise leave unacknowledged. |
+| Evidenced, completed node failure | Default: delayed NAK when connected. Optional `onExecutionError=acknowledge`: confirmed ACK, retaining the failed n8n run. |
+| Failure to start/enqueue or unrecognized execution/persistence failure | Delayed NAK when connected; otherwise leave unacknowledged. |
 | Canceled, crashed, rejected promise, absent result, or unknown state | Never ACK as success. Release for redelivery. |
 | ACK confirmation timeout/disconnect | Report an unconfirmed outcome; do not claim the message was definitely ACKed or definitely not ACKed. |
 | Failure after an acknowledged Wait handoff | Handled through n8n's resumed execution/error handling; no NATS redelivery is requested by this trigger. |
@@ -202,6 +215,8 @@ Required observable acceptance cases:
 8. Regular mode, queue mode, manual execution, workflow deactivation, and overlapping trigger processes exercise the same stated completion contract. Record the tested host/server versions.
 9. Publisher handles JSON/Text/Binary, repeated headers, item pairing, expected-stream rejection, duplicate IDs within a configured window, permission failures, and uncertain publish/ACK outcomes.
 10. No timer/iterator/connection leaks after activation failure, repeated manual tests, reconnect, or shutdown. In-flight work and buffering stay within the configured bound.
+11. Batch mode emits separate paired items in one execution, serializes batches, preserves raw Text and metadata, respects the message budget, heartbeats during collection and handles partial/empty pulls and manual shutdown.
+12. Optional terminal-error ACK preserves the failed result; defaults redeliver. Actual target-host admission/persistence faults, cancellation and unknown results must not receive terminal-error ACKs. Native n8n RetryOnFail can succeed within one execution without broker redelivery.
 
 Document actual measurements and remaining limitations. Do not mark a scenario as tested when only its mocked unit test passed. Do not publish to npm, deploy a runtime, change broker configuration, or modify another repository as part of implementation without separate authorization.
 

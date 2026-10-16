@@ -2,6 +2,29 @@
 
 The manual grace-period limitation was explicitly approved and is recorded in the canonical [specification.md](specification.md). The historical implementation measurements below belong to commit `c4a86f41988baeea73ab7e57cdf407a850bdab23`, before the package and registration identifiers were renamed. They are not new-name installation measurements; rename verification and the subsequent public release are recorded separately.
 
+## 0.1.2 candidate: batching and terminal execution-error policy
+
+Measured on macOS arm64, Node **26.8.1**, npm **11.19.0**, official node CLI **0.51.4**, n8n-workflow development interface **2.42.2** and NATS SDK **3.4.0**. Native NATS **2.14.6** archive SHA-256 `291b9aa8c342b3cdcc53d872585bd467de4b5c9acf375066d882eb5412a09d55` and negative compatibility fixture **2.9.25** SHA-256 `fdec68b67230f0fcf8ffbf6d0a2e8ac1b4c6b8298ba64acd7000b5fe6212ccc1` matched their official release checksums. JWT fixture generator: **0.0.10-5**. All brokers and credentials were synthetic/disposable; fixtures honored task-specific `TMPDIR`.
+
+- `npm run check`: build, official lint, typecheck and **28/28 unit tests**, zero failures/skips (unit portion 398.7 ms).
+- `npm run test:broker`, with `NATS_SERVER_BIN` pointing to 2.14.6 and the explicit old/JWT fixture paths: **24/24 tests**, zero failures/skips, **21.358 s**. This fresh run includes authentication/TLS, consumer creation, publisher, bounded single delivery, overlapping processes/crash, reconnect, old-server compatibility and uncertain ACK regressions.
+- New broker cases verify one batch at a time even with excess capacity, raw Text/headers/metadata/pairing, progress through collection/execution, partial and empty pulls, terminal error ACK versus default/unknown-result redelivery, manual settlement, unfinished shutdown and Binary helpers.
+- `node --check tests/host/wait.test.cjs` and `git diff --check`: passed. The new **actual-host** cases have not yet run: they are separate from unit/broker adapter tests and the historical host results below. The fixture now includes normal node failure versus database admission/save rejection in regular/queue mode, native HTTP RetryOnFail, raw Text/pairing and manual batching. Target n8n **2.42.6** qualification remains pending; this candidate is not yet published.
+
+The terminal-node predicate uses only public `IRun` fields: error status, finite terminal timestamp, last executed node, errored final task, and deep-equal task/top-level error. Inspected n8n 2.42.6 source distinguishes runner `processError` (empty runData), preflight task failure (no task.error), and overwritten top-level persistence errors from normal node failures. This source inspection is not proof that every host error/persistence path has been qualified; unknown or mismatched evidence remains recoverable.
+
+### Synthetic backlog benchmark (not n8n throughput)
+
+`NATS_SERVER_BIN=<2.14.6 binary> node tests/bench/batch.cjs` completed with 1,000 prepublished messages per scenario, fixed **2 ms per execution** in a public-interface adapter, zero duplicate/redelivered messages, and confirmed ACK completion. Publication is outside the clock; activation is inside. No n8n admission, persistence, application I/O or low-volume collection timeout is represented.
+
+| Scenario | Message budget | Executions | Total through ACKs | Messages/s | Completion latency p50 / p95 / p99 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Serial single | 1 | 1,000 | 3,171.84 ms | 315.27 | 1,616.34 / 3,008.52 / 3,131.85 ms |
+| Concurrent single | 50 | 1,000 | 101.65 ms | 9,838.15 | 49.85 / 91.48 / 92.81 ms |
+| Serial batch of 50 | 50 | 20 | 196.82 ms | 5,080.74 | 87.39 / 172.53 / 180.83 ms |
+
+Batching reduced execution count **50-fold** and beat serial single processing in this synthetic workload; concurrent single processing was faster than serialized batches. These are measured adapter results, not a production speedup or evidence that batching always improves throughput. Batch ACKs are confirmed individually and not atomically. Delayed NAK, restart and overlapping subscribers do not preserve strict FIFO.
+
 ## Public release and subsequent runtime checks
 
 Version [0.1.0](https://www.npmjs.com/package/n8n-nodes-nats-jetstream/v/0.1.0) was published from tag `v0.1.0`, source commit `52f1c798bbe33ec6e612335be902f11f3cb86ac1`. [Publication run 38029187121](https://github.com/digows/n8n-nodes-nats-jetstream/actions/runs/38029187121) passed build/lint/types, 18 unit tests and 15 real-broker tests with zero failures/skips on Node 24.21.0 and npm 11.19.0. The public tarball's downloaded SHA-1 and SHA-512 matched the reviewed artifact. The registry exposes provenance attestations for this version.

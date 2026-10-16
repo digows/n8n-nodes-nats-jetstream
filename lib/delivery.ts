@@ -1,6 +1,7 @@
 import type { JsMsg } from '@nats-io/jetstream';
 import type { IRun, ITriggerFunctions } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
+import { isDeepStrictEqual } from 'node:util';
 import { messageItem, type PayloadFormat } from './payload';
 
 export interface DeliveryOptions
@@ -9,6 +10,7 @@ export interface DeliveryOptions
     progressIntervalMs: number;
     nakDelayMs: number;
     ackTimeoutMs: number;
+    onExecutionError?: 'redeliver' | 'acknowledge';
 }
 
 export function completedBoundary(result: IRun | undefined): boolean
@@ -18,11 +20,26 @@ export function completedBoundary(result: IRun | undefined): boolean
     return result.status === 'waiting' && Boolean(result.waitTill) && Number.isFinite(new Date(result.waitTill!).getTime());
 }
 
+export function terminalNodeError(result: IRun | undefined): boolean
+{
+    if (result?.status !== 'error' || !result.stoppedAt || !Number.isFinite(new Date(result.stoppedAt).getTime())) return false;
+    const resultData = result.data?.resultData;
+    const nodeName = resultData?.lastNodeExecuted;
+    if (!nodeName || !resultData.error) return false;
+    const task = resultData.runData?.[nodeName]?.at(-1);
+    // Infrastructure failures may also resolve as status=error, without a matching failed node.
+    return task?.executionStatus === 'error' && Boolean(task.error) && isDeepStrictEqual(task.error, resultData.error);
+}
+
 export async function deliverMessage(context: ITriggerFunctions, message: JsMsg, options: DeliveryOptions, signal: AbortSignal, connected: () => boolean): Promise<void>
 {
-    const completion = context.helpers.createDeferredPromise<IRun>();
-    // Attach rejection handlers before decoding/emitting to avoid unhandled enqueue failures.
-    const resultPromise = completion.promise.then(result => result, () => undefined);
+    await deliverBatch(context, [message], options, signal, connected);
+}
+
+export async function deliverBatch(context: ITriggerFunctions, source: Iterable<JsMsg> | AsyncIterable<JsMsg>, options: DeliveryOptions, signal: AbortSignal, connected: () => boolean, canEmit: () => boolean = () => true): Promise<void>
+{
+    const messages: JsMsg[] = [];
+    const unsettled = new Set<JsMsg>();
     let abortHandler: (() => void) | undefined;
     const aborted = new Promise<undefined>(resolve =>
     {
@@ -32,7 +49,11 @@ export async function deliverMessage(context: ITriggerFunctions, message: JsMsg,
     });
     const progress = () =>
     {
-        if (connected()) message.working();
+        if (connected()) for (const message of unsettled) message.working();
+    };
+    const release = (deliveries: JsMsg[] = messages) =>
+    {
+        if (connected()) for (const message of deliveries) message.nak(options.nakDelayMs);
     };
     const timer = setInterval(() =>
     {
@@ -41,44 +62,72 @@ export async function deliverMessage(context: ITriggerFunctions, message: JsMsg,
     }, options.progressIntervalMs);
     try
     {
-        progress();
-        let item;
         try
         {
-            item = await messageItem(message, options.format, context.helpers);
+            for await (const message of source)
+            {
+                messages.push(message);
+                unsettled.add(message);
+                if (connected()) message.working();
+                if (signal.aborted) break;
+            }
+        }
+        catch (error)
+        {
+            release();
+            throw error;
+        }
+        if (!messages.length) return;
+        if (signal.aborted || !canEmit()) { release(); return; }
+        const completion = context.helpers.createDeferredPromise<IRun>();
+        const resultPromise = completion.promise.then(result => result, () => undefined);
+        const items = [];
+        try
+        {
+            for (const [index, message] of messages.entries())
+            {
+                const item = await messageItem(message, options.format, context.helpers);
+                items.push(messages.length > 1 ? { ...item, pairedItem: { item: index } } : item);
+            }
         }
         catch (error)
         {
             context.saveFailedExecution(new NodeOperationError(context.getNode(), error instanceof Error ? error : new Error('Message conversion failed')));
-            if (connected()) message.nak(options.nakDelayMs);
+            release();
             return;
         }
-        if (signal.aborted) return;
+        if (signal.aborted || !canEmit()) { release(); return; }
         try
         {
-            context.emit([[item]], undefined, completion);
+            context.emit([items], undefined, completion);
         }
         catch
         {
-            if (connected()) message.nak(options.nakDelayMs);
+            release();
             context.saveFailedExecution(new NodeOperationError(context.getNode(), 'Triggered execution could not start'));
             return;
         }
         const result = await Promise.race([resultPromise, aborted]);
-        if (signal.aborted || !completedBoundary(result))
+        const acknowledge = completedBoundary(result) || (options.onExecutionError === 'acknowledge' && terminalNodeError(result));
+        if (signal.aborted || !acknowledge)
         {
-            if (connected()) message.nak(options.nakDelayMs);
+            release();
             return;
         }
-        // Once confirmation starts, its timeout/disconnect is ambiguous: do not NAK it.
-        try
+        for (const [index, message] of messages.entries())
         {
-            const confirmed = await message.ackAck({ timeout: options.ackTimeoutMs });
-            if (!confirmed) throw new Error('ACK not confirmed');
-        }
-        catch
-        {
-            context.saveFailedExecution(new NodeOperationError(context.getNode(), 'NATS ACK confirmation is unknown; the message may be redelivered'));
+            if (signal.aborted) { release(messages.slice(index)); return; }
+            // Once confirmation starts, its timeout/disconnect is ambiguous: do not NAK it.
+            try
+            {
+                const confirmed = await message.ackAck({ timeout: options.ackTimeoutMs });
+                if (!confirmed) throw new Error('ACK not confirmed');
+            }
+            catch
+            {
+                context.saveFailedExecution(new NodeOperationError(context.getNode(), 'NATS ACK confirmation is unknown; the message may be redelivered'));
+            }
+            unsettled.delete(message);
         }
     }
     finally

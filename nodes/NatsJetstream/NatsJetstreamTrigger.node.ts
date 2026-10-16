@@ -2,7 +2,7 @@ import type { ConsumerMessages } from '@nats-io/jetstream';
 import { NodeConnectionTypes, NodeOperationError, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse } from 'n8n-workflow';
 import { bindConsumer, creationConfiguration, progressInterval } from '../../lib/consumer';
 import { openConnection, optionalText, positiveInteger, requiredText, withinTimeout } from '../../lib/connection';
-import { deliverMessage } from '../../lib/delivery';
+import { deliverBatch, deliverMessage, type DeliveryOptions } from '../../lib/delivery';
 import type { PayloadFormat } from '../../lib/payload';
 import { NatsJetstream } from './NatsJetstream.node';
 
@@ -28,8 +28,10 @@ export class NatsJetstreamTrigger implements INodeType
             ] },
             { displayName: 'Options', name: 'options', type: 'collection', placeholder: 'Add Option', default: {}, options: [
                 { displayName: 'ACK Confirmation Timeout (Ms)', name: 'ackTimeoutMs', type: 'number', default: 5000, typeOptions: { minValue: 1 } },
+                { displayName: 'Batch Size', name: 'batchSize', type: 'number', default: 1, typeOptions: { minValue: 1 }, description: 'Messages per execution; greater than one serializes batches and must fit the maximum in-flight message budget' },
                 { displayName: 'Delayed NAK Interval (Ms)', name: 'nakDelayMs', type: 'number', default: 5000, typeOptions: { minValue: 1 } },
                 { displayName: 'Maximum In-Flight Messages', name: 'maxInFlight', type: 'number', default: 1, typeOptions: { minValue: 1 }, description: 'Includes fetched, queued, running and unconfirmed messages' },
+                { displayName: 'On Execution Error', name: 'onExecutionError', type: 'options', default: 'redeliver', options: [{ name: 'Redeliver', value: 'redeliver' }, { name: 'Acknowledge', value: 'acknowledge' }], description: 'Acknowledge only a completed node failure; admission failures, cancellation and unknown outcomes remain recoverable. The n8n execution remains failed.' },
                 { displayName: 'Pull Timeout (Ms)', name: 'pullTimeoutMs', type: 'number', default: 5000, typeOptions: { minValue: 1000 } },
                 { displayName: 'Shutdown Grace Period (Ms)', name: 'shutdownGraceMs', type: 'number', default: 30000, typeOptions: { minValue: 1 }, description: 'Automatic: wait for in-flight work on shutdown. Manual: settlement deadline from trigger output; expiry releases the message for redelivery while downstream execution may continue.' },
             ] },
@@ -47,15 +49,20 @@ export class NatsJetstreamTrigger implements INodeType
         if (!['existing', 'create'].includes(mode)) throw new NodeOperationError(this.getNode(), 'Select a supported consumer mode');
         const options = this.getNodeParameter('options') as Record<string, unknown>;
         const manual = this.getMode() === 'manual';
-        const capacity = manual ? 1 : positiveInteger(options.maxInFlight ?? 1, 'Maximum in-flight messages');
+        const batchSize = positiveInteger(options.batchSize ?? 1, 'Batch size');
+        const capacity = manual && batchSize === 1 ? 1 : positiveInteger(options.maxInFlight ?? 1, 'Maximum in-flight messages');
+        if (batchSize > capacity) throw new NodeOperationError(this.getNode(), 'Batch size must fit the maximum in-flight message budget');
+        const onExecutionError = options.onExecutionError ?? 'redeliver';
+        if (onExecutionError !== 'redeliver' && onExecutionError !== 'acknowledge') throw new NodeOperationError(this.getNode(), 'Select a supported execution error policy');
         const pullTimeoutMs = positiveInteger(options.pullTimeoutMs ?? 5000, 'Pull timeout');
         if (pullTimeoutMs < 1000) throw new NodeOperationError(this.getNode(), 'Pull timeout must be at least 1000 ms');
         const shutdownGraceMs = positiveInteger(options.shutdownGraceMs ?? 30000, 'Shutdown grace period');
-        const deliveryOptions = {
+        const deliveryOptions: DeliveryOptions = {
             format: this.getNodeParameter('payloadFormat') as PayloadFormat,
             nakDelayMs: positiveInteger(options.nakDelayMs ?? 5000, 'Delayed NAK interval'),
             ackTimeoutMs: positiveInteger(options.ackTimeoutMs ?? 5000, 'ACK confirmation timeout'),
             progressIntervalMs: 0,
+            onExecutionError,
         };
         const connection = await openConnection(credentials);
         try
@@ -155,16 +162,27 @@ export class NatsJetstreamTrigger implements INodeType
                         const available = capacity - inFlight.size;
                         try
                         {
-                            iterator = await consumer.fetch({ max_messages: available, expires: pullTimeoutMs });
+                            iterator = await consumer.fetch({ max_messages: batchSize > 1 ? batchSize : available, expires: pullTimeoutMs });
                             if (stopping) { await iterator.close(); break; }
-                            for await (const message of iterator)
+                            if (batchSize > 1)
                             {
-                                if (stopping || controller.signal.aborted) break;
-                                const task = deliverMessage(this, message, deliveryOptions, controller.signal, () => connected && !connection.isClosed())
-                                    .catch(() => fatal());
+                                const task = deliverBatch(this, iterator, deliveryOptions, controller.signal, () => connected && !connection.isClosed(), () => !stopping);
                                 inFlight.add(task);
-                                void task.finally(() => inFlight.delete(task));
-                                if (manual) break;
+                                try { await task; }
+                                finally { inFlight.delete(task); }
+                                if (manual && iterator.getProcessed() > 0) break;
+                            }
+                            else
+                            {
+                                for await (const message of iterator)
+                                {
+                                    if (stopping || controller.signal.aborted) break;
+                                    const task = deliverMessage(this, message, deliveryOptions, controller.signal, () => connected && !connection.isClosed())
+                                        .catch(() => fatal());
+                                    inFlight.add(task);
+                                    void task.finally(() => inFlight.delete(task));
+                                    if (manual) break;
+                                }
                             }
                         }
                         catch (error)

@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const { spawn } = require('node:child_process');
 const { mkdtemp, mkdir, symlink, rm } = require('node:fs/promises');
 const { join } = require('node:path');
+const { tmpdir } = require('node:os');
 const { pathToFileURL } = require('node:url');
 const { DatabaseSync } = require('node:sqlite');
 const { createServer } = require('node:http');
@@ -25,7 +26,7 @@ async function stop(child)
 
 async function host(directory, mode, postgres, redisPort)
 {
-    assert.ok(process.env.N8N_TEST_CLI, 'Set N8N_TEST_CLI to n8n 2.42.3 bin/n8n');
+    assert.ok(process.env.N8N_TEST_CLI, 'Set N8N_TEST_CLI to the target n8n bin/n8n');
     const serverPort = await port();
     const brokerPort = await port();
     const environment = {
@@ -82,9 +83,9 @@ async function host(directory, mode, postgres, redisPort)
 
 for (const mode of ['regular', 'queue'])
 {
-    test(`n8n 2.42.3 ${mode}: persisted Wait, restart/resume, persistence failure and manual execution`, { timeout: 180000 }, async suite =>
+    test(`n8n ${process.env.N8N_TEST_HOST_VERSION ?? '2.42.3'} ${mode}: persisted Wait, errors, retries, batches and manual execution`, { timeout: 240000 }, async suite =>
     {
-        const directory = await mkdtemp(join('/tmp', `jetstream-host-${mode}-`));
+        const directory = await mkdtemp(join(tmpdir(), `jetstream-host-${mode}-`));
         const server = await broker();
         const connection = await connect({ servers: server.url });
         const manager = await jetstreamManager(connection);
@@ -224,6 +225,7 @@ for (const mode of ['regular', 'queue'])
             {
                 const url = new URL(request.url, 'http://localhost');
                 requests.push(url.pathname);
+                if (url.pathname === '/native-retry' && requests.filter(path => path === '/native-retry').length < 3) response.statusCode = 503;
                 const timer = setTimeout(() => { responseTimers.delete(timer); response.setHeader('Content-Type', 'application/json'); response.end('{}'); }, Number(url.searchParams.get('delayMs')));
                 responseTimers.add(timer);
                 response.on('close', () => { clearTimeout(timer); responseTimers.delete(timer); });
@@ -310,6 +312,88 @@ for (const mode of ['regular', 'queue'])
             assert.ok((await executions(manualPersistenceFailure.id)).every(row => row.status !== 'waiting'));
             await assertRecovery('manual-persist-failure');
             suite.diagnostic('Real manual Wait persistence failure caused no success ACK and remained recoverable');
+
+            async function createProcessingWorkflow(suffix, processingNodes, selectedOptions = {}, format = 'json', activate = true)
+            {
+                const trigger = { id: `processing-${suffix}`, name: 'JetStream', type: 'n8n-nodes-nats-jetstream.natsJetstreamTrigger', typeVersion: 1, position: [0, 0], credentials: { natsJetstreamApi: { id: credential.id, name: credential.name } }, parameters: { stream: 'HOST', durable: suffix, consumerMode: 'create', creation: { subjectFilters: `host.${suffix}`, ackWaitMs: 150, maxDeliver: 2, maxAckPending: -1 }, payloadFormat: format, options: { maxInFlight: 2, nakDelayMs: 100, pullTimeoutMs: 1000, shutdownGraceMs: 2000, ...selectedOptions } } };
+                const nodes = [trigger, ...processingNodes];
+                const connections = Object.fromEntries(nodes.slice(0, -1).map((node, index) => [node.name, { main: [[{ node: nodes[index + 1].name, type: 'main', index: 0 }]] }]));
+                const workflow = await instance.request('/rest/workflows', 'POST', { name: suffix, nodes, connections, settings: { executionOrder: 'v1', saveDataSuccessExecution: 'all', saveDataErrorExecution: 'all', saveManualExecutions: true } });
+                if (activate) await instance.request(`/rest/workflows/${workflow.id}/activate`, 'POST', { versionId: workflow.versionId });
+                return workflow;
+            }
+            const terminalNode = { id: 'terminal-failure', name: 'Fail', type: 'n8n-nodes-base.stopAndError', typeVersion: 1, position: [400, 0], parameters: { errorMessage: 'Synthetic terminal node failure' } };
+            const collectNode = { id: 'collect-batch', name: 'Collect', type: 'n8n-nodes-base.code', typeVersion: 2, position: [200, 0], parameters: { jsCode: 'return $input.all();' } };
+            const terminal = await createProcessingWorkflow('terminal-ack', [collectNode, terminalNode], { batchSize: 2, onExecutionError: 'acknowledge' }, 'text');
+            const rawPayloads = ['{"id":9223372036854775807,"value":"original\\u0000"}', '{"id":9223372036854775806}'];
+            for (const payload of rawPayloads) await client.publish('host.terminal-ack', Buffer.from(payload));
+            await until(async () =>
+            {
+                const rows = await executions(terminal.id);
+                return rows.length === 1 && rows[0].status === 'error' && (await manager.consumers.info('HOST', 'terminal-ack')).num_ack_pending === 0;
+            }, 30000);
+            const terminalRow = (await executions(terminal.id))[0];
+            const terminalExecution = await instance.request(`/rest/executions/${terminalRow.id}`);
+            const terminalData = typeof terminalExecution.data === 'string' ? parse(terminalExecution.data) : terminalExecution.data;
+            assert.equal(terminalData.resultData.error.message, 'Synthetic terminal node failure');
+            const collected = terminalData.resultData.runData.Collect[0].data.main[0];
+            assert.deepEqual(collected.map(item => item.json.payload), rawPayloads);
+            assert.deepEqual(collected.map(item => item.pairedItem.item), [0, 1]);
+            assert.equal((await manager.consumers.info('HOST', 'terminal-ack')).num_redelivered, 0);
+            await instance.request(`/rest/workflows/${terminal.id}/deactivate`, 'POST', {});
+            suite.diagnostic('Native failed batch remains persisted as error, preserves raw Text/pairing and receives terminal-policy ACKs');
+
+            const defaultError = await createProcessingWorkflow('terminal-redeliver', [terminalNode]);
+            await client.publish('host.terminal-redeliver', Buffer.from('{}'));
+            await until(async () => (await manager.consumers.info('HOST', 'terminal-redeliver')).num_redelivered > 0, 30000);
+            await instance.request(`/rest/workflows/${defaultError.id}/deactivate`, 'POST', {});
+            assert.ok((await executions(defaultError.id)).every(row => row.status === 'error'));
+
+            for (const fault of ['admission', 'persistence'])
+            {
+                const workflow = await createProcessingWorkflow(`fault-${fault}`, [terminalNode], { onExecutionError: 'acknowledge' });
+                const operation = fault === 'admission' ? 'INSERT' : 'UPDATE';
+                const statusCondition = fault === 'admission' ? '' : " AND NEW.status = 'error'";
+                if (sqlite)
+                {
+                    sqlite.exec(`CREATE TRIGGER fail_${fault} BEFORE ${operation} ON execution_entity WHEN NEW.workflowId = '${workflow.id}'${statusCondition} BEGIN SELECT RAISE(ABORT, 'Synthetic ${fault} failure'); END;`);
+                }
+                else
+                {
+                    await databaseClient.query(`CREATE FUNCTION fail_${fault}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW."workflowId" = '${workflow.id}'${statusCondition} THEN RAISE EXCEPTION 'Synthetic ${fault} failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_${fault} BEFORE ${operation} ON execution_entity FOR EACH ROW EXECUTE FUNCTION fail_${fault}();`);
+                }
+                await client.publish(`host.fault-${fault}`, Buffer.from('{}'));
+                await until(async () => (await manager.consumers.info('HOST', `fault-${fault}`)).num_redelivered > 0, 30000);
+                await instance.request(`/rest/workflows/${workflow.id}/deactivate`, 'POST', {});
+                if (fault === 'admission') assert.equal((await executions(workflow.id)).length, 0);
+            }
+            suite.diagnostic('Native admission and failed-result persistence rejection redeliver despite acknowledge policy');
+
+            const retryNode = { id: 'native-retry', name: 'Retry', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: [200, 0], retryOnFail: true, maxTries: 3, waitBetweenTries: 1000, parameters: { url: `http://127.0.0.1:${slowServer.address().port}/native-retry`, options: {} } };
+            const retryWorkflow = await createProcessingWorkflow('native-retry', [retryNode], { maxInFlight: 1, onExecutionError: 'acknowledge' });
+            await client.publish('host.native-retry', Buffer.from('{}'));
+            await until(async () =>
+            {
+                const rows = await executions(retryWorkflow.id);
+                return rows.length === 1 && rows[0].status === 'success' && (await manager.consumers.info('HOST', 'native-retry')).num_ack_pending === 0;
+            }, 30000);
+            assert.equal(requests.filter(path => path === '/native-retry').length, 3);
+            assert.equal((await manager.consumers.info('HOST', 'native-retry')).num_redelivered, 0);
+            await instance.request(`/rest/workflows/${retryWorkflow.id}/deactivate`, 'POST', {});
+            suite.diagnostic('Native RetryOnFail completes on third HTTP attempt in one execution without broker redelivery');
+
+            const manualBatch = await createProcessingWorkflow('manual-batch', [collectNode], { batchSize: 2, onExecutionError: 'acknowledge' }, 'text', false);
+            await until(async () => await server.connections() === 1);
+            await beginManual(manualBatch, 'manual-batch');
+            for (let index = 0; index < 3; index++) await client.publish('host.manual-batch', Buffer.from(`item-${index}`));
+            await until(async () =>
+            {
+                const rows = await executions(manualBatch.id);
+                return rows.length === 1 && rows[0].status === 'success' && (await manager.consumers.info('HOST', 'manual-batch')).num_ack_pending === 0;
+            }, 30000);
+            await assertCleanup();
+            assert.equal((await manager.consumers.info('HOST', 'manual-batch')).num_pending, 1);
+            suite.diagnostic('Native manual batch consumes one execution only and leaves later messages pending');
         }
         catch (error)
         {
