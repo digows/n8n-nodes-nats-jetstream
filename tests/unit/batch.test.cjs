@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { headers } = require('@nats-io/transport-node');
-const { deliverBatch, deliverMessage, terminalNodeError } = require('../../dist/lib/delivery');
+const { deliverBatch } = require('../../dist/lib/delivery');
 const { NatsJetstreamTrigger } = require('../../dist/nodes/NatsJetstream/NatsJetstreamTrigger.node');
 const { triggerContext, run, until } = require('../helpers.cjs');
 
@@ -32,95 +32,35 @@ function failedNodeRun()
     };
 }
 
-function queuedNodeError()
+test('only opt-in acknowledge settles every returned error status without inspecting or modifying its details', async () =>
 {
-    const result = failedNodeRun();
-    return { ...result, jobId: '18', startedAt: new Date(Date.now() - 100), data: { resultData: {
-        lastNodeExecuted: 'Fail', runData: {}, error: { ...result.data.resultData.error, node: { id: 'terminal-failure', name: 'Fail', type: 'n8n-nodes-base.stopAndError' } },
-    } } };
-}
-
-test('terminal error recognition requires matching failed-node evidence, not status alone', () =>
-{
-    assert.equal(terminalNodeError(failedNodeRun()), true);
-    const serialized = JSON.parse(JSON.stringify(failedNodeRun()));
-    assert.equal(terminalNodeError(serialized), true);
-    for (const mutate of [
-        result => { result.stoppedAt = undefined; },
-        result => { result.stoppedAt = 'invalid'; },
-        result => { result.status = 'canceled'; },
-        result => { result.status = 'crashed'; },
-        result => { result.data.resultData.runData = {}; },
-        result => { result.data.resultData.lastNodeExecuted = undefined; },
-        result => { result.data.resultData.runData.Fail[0].executionStatus = 'success'; },
-        result => { delete result.data.resultData.runData.Fail[0].error; },
-        result => { result.data.resultData.error = { message: 'Persistence failed after node failure' }; },
-    ])
+    const results = [
+        failedNodeRun(),
+        { status: 'error' },
+        run('error'),
+        { ...run('error'), data: { resultData: { runData: {}, lastNodeExecuted: 'CodeFailure', error: { message: 'Code failure without a node marker' } } } },
+        { status: 'error', data: { resultData: { error: { message: 'Execution persistence failed' } } } },
+        { status: 'error', stoppedAt: 'invalid', jobId: null, data: { resultData: { lastNodeExecuted: 'Other',
+            error: { message: 'Operational failure' }, runData: { Fail: [{ executionStatus: 'success' }] } } } },
+    ];
+    for (const result of results) for (const policy of [undefined, 'redeliver', 'acknowledge'])
     {
-        const result = failedNodeRun();
-        mutate(result);
-        assert.equal(terminalNodeError(result), false);
-    }
-    assert.equal(terminalNodeError(undefined), false);
-});
-
-test('acknowledge policy settles a terminal node error without modifying the failed result', async () =>
-{
-    for (const createResult of [failedNodeRun, queuedNodeError]) for (const policy of ['redeliver', 'acknowledge'])
-    {
-        const result = createResult();
         const original = structuredClone(result);
-        const selected = delivery(1);
+        const deliveries = [delivery(1), delivery(2)];
         const context = triggerContext({}, {}, (_items, _response, completion) => completion.resolve(result));
-        await deliverMessage(context, selected.message, { ...options, onExecutionError: policy }, new AbortController().signal, () => true);
-        assert.equal(selected.statistics.acknowledged, policy === 'acknowledge' ? 1 : 0);
-        assert.equal(selected.statistics.released, policy === 'redeliver' ? 1 : 0);
+        await deliverBatch(context, deliveries.map(selected => selected.message), { ...options, onExecutionError: policy }, new AbortController().signal, () => true);
+        for (const selected of deliveries)
+        {
+            assert.equal(selected.statistics.acknowledged, policy === 'acknowledge' ? 1 : 0);
+            assert.equal(selected.statistics.released, policy === 'acknowledge' ? 0 : 1);
+        }
         assert.deepEqual(result, original);
         assert.deepEqual(context.failures, []);
     }
 });
-
-test('queue completion summaries require a matching public node-error marker', () =>
+test('acknowledge policy never acknowledges rejected admission/completion, cancellation, crash or missing results', async () =>
 {
-    assert.equal(terminalNodeError(queuedNodeError()), true);
-    assert.equal(terminalNodeError(JSON.parse(JSON.stringify(queuedNodeError()))), true);
-    for (const mutate of [
-        result => { delete result.jobId; },
-        result => { result.jobId = ''; },
-        result => { result.jobId = 18; },
-        result => { delete result.startedAt; },
-        result => { result.startedAt = 'invalid'; },
-        result => { delete result.data.resultData.runData; },
-        result => { result.data.resultData.runData = []; },
-        result => { result.data.resultData.runData = 1; },
-        result => { result.data.resultData.error = 'Unknown failure'; },
-        result => { delete result.data.resultData.error.node; },
-        result => { result.data.resultData.error.node = null; },
-        result => { result.data.resultData.error.node.name = 'Other'; },
-        result => { result.data.resultData.error = { message: 'Persistence failed after node failure' }; },
-        result => { result.status = 'canceled'; },
-        result => { result.status = 'crashed'; },
-    ])
-    {
-        const result = queuedNodeError();
-        mutate(result);
-        assert.equal(terminalNodeError(result), false);
-    }
-});
-
-test('queue summary recognition never overrides contradictory full task or preflight evidence', () =>
-{
-    for (const task of [{ executionStatus: 'error' }, { executionStatus: 'running' }, { executionStatus: 'error', error: { message: 'Different node error' } }])
-    {
-        const result = queuedNodeError();
-        result.data.resultData.runData.Fail = [task];
-        assert.equal(terminalNodeError(result), false);
-    }
-});
-
-test('acknowledge policy never acknowledges rejected admission, infrastructure, cancellation, crash or unknown results', async () =>
-{
-    for (const outcome of ['rejected', 'thrown', 'absent', 'error', 'canceled', 'crashed', 'running', 'unknown'])
+    for (const outcome of ['rejected', 'thrown', 'absent', 'canceled', 'crashed', 'running', 'unknown'])
     {
         const deliveries = [delivery(1), delivery(2)];
         const context = triggerContext({}, {}, (_items, _response, completion) =>
@@ -177,7 +117,7 @@ test('malformed batch conversion releases every message without emitting or ackn
 {
     const deliveries = [delivery(1, '{}'), delivery(2, '{invalid')];
     const context = triggerContext({}, {}, () => assert.fail('Malformed batch must not emit'));
-    await deliverBatch(context, deliveries.map(selected => selected.message), { ...options, format: 'json' }, new AbortController().signal, () => true);
+    await deliverBatch(context, deliveries.map(selected => selected.message), { ...options, format: 'json', onExecutionError: 'acknowledge' }, new AbortController().signal, () => true);
     assert.equal(context.failures.length, 1);
     for (const selected of deliveries)
     {

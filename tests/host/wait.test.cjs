@@ -58,7 +58,7 @@ async function host(directory, mode, postgres, redisPort)
     }
     async function start()
     {
-        child = spawn(process.execPath, ['--require', join(__dirname, '../fixtures/completion-diagnostic.cjs'), process.env.N8N_TEST_CLI, 'start'], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
+        child = spawn(process.execPath, [process.env.N8N_TEST_CLI, 'start'], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
         await until(async () =>
         {
@@ -74,7 +74,7 @@ async function host(directory, mode, postgres, redisPort)
     catch (error) { await stop(child); error.stack += `\n${output}`; throw error; }
     async function startWorker()
     {
-        worker = spawn(process.execPath, ['--require', join(__dirname, '../fixtures/completion-diagnostic.cjs'), process.env.N8N_TEST_CLI, 'worker', '--concurrency=2'], { env: { ...environment, N8N_RUNNERS_BROKER_PORT: String(await port()) }, stdio: ['ignore', 'pipe', 'pipe'] });
+        worker = spawn(process.execPath, [process.env.N8N_TEST_CLI, 'worker', '--concurrency=2'], { env: { ...environment, N8N_RUNNERS_BROKER_PORT: String(await port()) }, stdio: ['ignore', 'pipe', 'pipe'] });
         worker.stdout.on('data', chunk => { output += chunk; }); worker.stderr.on('data', chunk => { output += chunk; });
     }
     return {
@@ -419,12 +419,25 @@ for (const mode of ['regular', 'queue'])
                 {
                     await databaseClient.query(`CREATE FUNCTION fail_${fault}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW."workflowId" = '${workflow.id}'${statusCondition} THEN RAISE EXCEPTION 'Synthetic ${fault} failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_${fault} BEFORE ${operation} ON execution_entity FOR EACH ROW EXECUTE FUNCTION fail_${fault}();`);
                 }
-                await client.publish(`host.fault-${fault}`, Buffer.from('{}'));
-                await until(async () => (await manager.consumers.info('HOST', `fault-${fault}`)).num_redelivered > 0, 30000);
+                const published = await client.publish(`host.fault-${fault}`, Buffer.from('{}'));
+                if (fault === 'admission')
+                {
+                    await until(async () => (await manager.consumers.info('HOST', `fault-${fault}`)).num_redelivered > 0, 30000);
+                    assert.equal((await executions(workflow.id)).length, 0);
+                }
+                else
+                {
+                    // A returned error is opted into ACK even when saving that error failed.
+                    await until(async () =>
+                    {
+                        const consumer = await manager.consumers.info('HOST', `fault-${fault}`);
+                        return consumer.delivered.consumer_seq > 0 && consumer.ack_floor.stream_seq >= published.seq && consumer.num_ack_pending === 0;
+                    }, 30000);
+                    assert.equal((await manager.consumers.info('HOST', `fault-${fault}`)).num_redelivered, 0);
+                }
                 await instance.request(`/rest/workflows/${workflow.id}/deactivate`, 'POST', {});
-                if (fault === 'admission') assert.equal((await executions(workflow.id)).length, 0);
             }
-            suite.diagnostic('Native admission and failed-result persistence rejection redeliver despite acknowledge policy');
+            suite.diagnostic('Rejected native admission redelivers; returned persistence error receives opt-in ACK without a durable-error guarantee');
 
             const retryNode = { id: 'native-retry', name: 'Retry', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: [200, 0], retryOnFail: true, maxTries: 3, waitBetweenTries: 1000, parameters: { url: `http://127.0.0.1:${slowServer.address().port}/native-retry`, options: {} } };
             const retryWorkflow = await createProcessingWorkflow('native-retry', [retryNode], { maxInFlight: 1, onExecutionError: 'acknowledge' });
@@ -468,8 +481,6 @@ for (const mode of ['regular', 'queue'])
                 await instance.request(`/rest/workflows/${workflow.id}/deactivate`, 'POST', {});
                 suite.diagnostic(`${scenario.suffix}: one persisted native error, confirmed terminal-policy ACK and no broker redelivery${scenario.suffix === 'terminal-http' ? ' after three HTTP 401 attempts' : ''}`);
             }
-            suite.diagnostic(instance.output.split('\n').filter(line => line.startsWith('NATS_TEST_PUBLIC_COMPLETION')).slice(-4).join('\n'));
-
             const manualBatch = await createProcessingWorkflow('manual-batch', [collectNode], { batchSize: 2, onExecutionError: 'acknowledge' }, 'text', false);
             await until(async () => await server.connections() === 1);
             await beginManual(manualBatch, 'manual-batch');

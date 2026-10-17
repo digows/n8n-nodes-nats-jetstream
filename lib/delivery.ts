@@ -1,7 +1,6 @@
 import type { JsMsg } from '@nats-io/jetstream';
 import type { IRun, ITriggerFunctions } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { isDeepStrictEqual } from 'node:util';
 import { messageItem, type PayloadFormat } from './payload';
 
 export interface DeliveryOptions
@@ -18,26 +17,6 @@ export function completedBoundary(result: IRun | undefined): boolean
     if (!result?.data?.resultData || result.data.resultData.error) return false;
     if (result.status === 'success') return true;
     return result.status === 'waiting' && Boolean(result.waitTill) && Number.isFinite(new Date(result.waitTill!).getTime());
-}
-
-export function terminalNodeError(result: IRun | undefined): boolean
-{
-    if (result?.status !== 'error' || !result.stoppedAt || !Number.isFinite(new Date(result.stoppedAt).getTime())) return false;
-    const resultData = result.data?.resultData;
-    const nodeName = resultData?.lastNodeExecuted;
-    if (!nodeName || !resultData.error) return false;
-    const runData = resultData.runData;
-    if (!runData || typeof runData !== 'object' || Array.isArray(runData)) return false;
-    const task = runData?.[nodeName]?.at(-1);
-    if (Object.keys(runData).length > 0)
-    {
-        return task?.executionStatus === 'error' && Boolean(task.error) && isDeepStrictEqual(task.error, resultData.error);
-    }
-    // Queue completion summaries omit tasks. Retain public node-error evidence;
-    // a job identifier and last node alone also occur after infrastructure failures.
-    const failedNode = typeof resultData.error === 'object' && 'node' in resultData.error ? resultData.error.node : undefined;
-    return typeof result.jobId === 'string' && result.jobId.length > 0 &&
-        Boolean(result.startedAt) && Number.isFinite(new Date(result.startedAt).getTime()) && failedNode?.name === nodeName;
 }
 
 export async function deliverMessage(context: ITriggerFunctions, message: JsMsg, options: DeliveryOptions, signal: AbortSignal, connected: () => boolean): Promise<void>
@@ -117,7 +96,7 @@ export async function deliverBatch(context: ITriggerFunctions, source: Iterable<
             return;
         }
         const result = await Promise.race([resultPromise, aborted]);
-        const acknowledge = completedBoundary(result) || (options.onExecutionError === 'acknowledge' && terminalNodeError(result));
+        const acknowledge = completedBoundary(result) || (options.onExecutionError === 'acknowledge' && result?.status === 'error');
         if (signal.aborted || !acknowledge)
         {
             release();

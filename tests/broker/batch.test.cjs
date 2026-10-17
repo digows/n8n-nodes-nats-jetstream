@@ -63,34 +63,46 @@ test('real broker batching and execution-error policies', async suite =>
             }
             finally { await response.closeFunction(); }
         });
-        await suite.test('default failed batches redeliver; opt-in terminal errors acknowledge; infrastructure outcomes still redeliver', async () =>
+        await suite.test('default errors and rejected completion redeliver; opt-in ACK includes markerless and operational returned errors', async () =>
         {
-            for (const policy of ['redeliver', 'acknowledge', 'infrastructure'])
+            for (const scenario of [
+                { durable: 'default-error', result: failedNodeRun() },
+                { durable: 'node-error', acknowledge: true, result: failedNodeRun() },
+                { durable: 'markerless-code', acknowledge: true, result: { status: 'error', data: { resultData: { runData: {}, error: { message: 'Synthetic Code failure' } } } } },
+                { durable: 'operational-error', acknowledge: true, result: { status: 'error', data: { resultData: { error: { message: 'Synthetic persistence failure' } } } } },
+                { durable: 'rejected-completion', acknowledge: true, reject: true },
+            ])
             {
                 const emitted = [];
-                const failed = policy === 'infrastructure' ? { ...run('error'), stoppedAt: new Date() } : failedNodeRun();
+                const failed = scenario.result;
                 const original = structuredClone(failed);
-                const context = triggerContext(credential, parameters(policy, policy === 'redeliver' ? {} : { onExecutionError: 'acknowledge' }), (items, _response, completion) =>
+                const context = triggerContext(credential, parameters(scenario.durable, scenario.acknowledge ? { onExecutionError: 'acknowledge' } : {}), (items, _response, completion) =>
                 {
                     emitted.push(items[0]);
+                    if (scenario.reject && emitted.length === 1) { completion.reject(new Error('Synthetic rejected completion')); return; }
                     completion.resolve(emitted.length === 1 ? failed : run('success'));
                 });
                 const response = await NatsJetstreamTrigger.prototype.trigger.call(context);
                 try
                 {
-                    for (let index = 0; index < 2; index++) await client.publish(`batch.${policy}`, Buffer.from(String(index)));
-                    if (policy === 'acknowledge')
+                    let published;
+                    for (let index = 0; index < 2; index++) published = await client.publish(`batch.${scenario.durable}`, Buffer.from(String(index)));
+                    if (scenario.acknowledge && !scenario.reject)
                     {
-                        await until(async () => emitted.length === 1 && (await manager.consumers.info('BATCH', policy)).num_ack_pending === 0);
+                        await until(async () =>
+                        {
+                            const consumer = await manager.consumers.info('BATCH', scenario.durable);
+                            return emitted.length === 1 && consumer.ack_floor.stream_seq >= published.seq && consumer.num_ack_pending === 0;
+                        });
                         await new Promise(resolve => setTimeout(resolve, 300));
                         assert.equal(emitted.length, 1);
-                        assert.equal((await manager.consumers.info('BATCH', policy)).num_redelivered, 0);
+                        assert.equal((await manager.consumers.info('BATCH', scenario.durable)).num_redelivered, 0);
                     }
                     else
                     {
                         await until(() => emitted.length === 2);
                         assert.ok(emitted[1].every(item => item.json.metadata.redelivered));
-                        await until(async () => (await manager.consumers.info('BATCH', policy)).num_ack_pending === 0);
+                        await until(async () => (await manager.consumers.info('BATCH', scenario.durable)).num_ack_pending === 0);
                     }
                     assert.deepEqual(failed, original);
                     assert.deepEqual(context.fatal, []);

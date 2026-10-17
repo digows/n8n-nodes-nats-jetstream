@@ -12,6 +12,8 @@ This is an unverified community package for self-hosted n8n. Publishing to npm d
 
 The subsequent `host` job runs the actual n8n **2.42.6** regular/queue suite with isolated SQLite/PostgreSQL databases and pinned native NATS **2.14.6** and Redis **8.10.0** fixtures. It installs the built package and the host's exact `n8n-workflow` peer in a separate community-node directory. Fixture data and npm cache use a task-specific temporary directory; no production services or secrets are required. Publication inherits this host gate through the reusable CI. A passing build/unit/broker job alone is not a passing host result; current candidate qualification and historical measurements are distinguished in [validation](validation.md).
 
+The 0.1.2 candidate's opt-in `onExecutionError=acknowledge` confirms any public completion returned with `status=error`, including operational/persistence errors; it neither converts the result to success nor guarantees error storage. Default redelivery and recovery for rejected/missing completion, conversion/admission rejection, cancellation and unfinished shutdown remain unchanged. Native host tests must validate this explicit contract without temporary probes or node-error classifiers before release.
+
 ## One-time publishing setup
 
 You need an npm account authorized to publish `n8n-nodes-nats-jetstream`. The existing publish job targets the GitHub environment `npm`. Review its repository/environment access controls deliberately; this documentation does not require adding new protection settings for each release.
