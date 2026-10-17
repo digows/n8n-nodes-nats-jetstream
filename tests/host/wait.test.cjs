@@ -319,7 +319,15 @@ for (const mode of ['regular', 'queue'])
                 const nodes = [trigger, ...processingNodes];
                 const connections = Object.fromEntries(nodes.slice(0, -1).map((node, index) => [node.name, { main: [[{ node: nodes[index + 1].name, type: 'main', index: 0 }]] }]));
                 const workflow = await instance.request('/rest/workflows', 'POST', { name: suffix, nodes, connections, settings: { executionOrder: 'v1', saveDataSuccessExecution: 'all', saveDataErrorExecution: 'all', saveManualExecutions: true } });
-                if (activate) await instance.request(`/rest/workflows/${workflow.id}/activate`, 'POST', { versionId: workflow.versionId });
+                if (activate)
+                {
+                    await instance.request(`/rest/workflows/${workflow.id}/activate`, 'POST', { versionId: workflow.versionId });
+                    await until(async () =>
+                    {
+                        try { return await manager.consumers.info('HOST', suffix); }
+                        catch (error) { if (error.code === 10014) return false; throw error; }
+                    }, 15000);
+                }
                 return workflow;
             }
             const terminalNode = { id: 'terminal-failure', name: 'Fail', type: 'n8n-nodes-base.stopAndError', typeVersion: 1, position: [400, 0], parameters: { errorMessage: 'Synthetic terminal node failure' } };
