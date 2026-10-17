@@ -327,11 +327,35 @@ for (const mode of ['regular', 'queue'])
             const terminal = await createProcessingWorkflow('terminal-ack', [collectNode, terminalNode], { batchSize: 2, onExecutionError: 'acknowledge' }, 'text');
             const rawPayloads = ['{"id":9223372036854775807,"value":"original\\u0000"}', '{"id":9223372036854775806}'];
             for (const payload of rawPayloads) await client.publish('host.terminal-ack', Buffer.from(payload));
-            await until(async () =>
+            try
             {
-                const rows = await executions(terminal.id);
-                return rows.length === 1 && rows[0].status === 'error' && (await manager.consumers.info('HOST', 'terminal-ack')).num_ack_pending === 0;
-            }, 30000);
+                await until(async () =>
+                {
+                    const rows = await executions(terminal.id);
+                    return rows.length === 1 && rows[0].status === 'error' && (await manager.consumers.info('HOST', 'terminal-ack')).num_ack_pending === 0;
+                }, 30000);
+            }
+            catch (error)
+            {
+                try
+                {
+                    const rows = await executions(terminal.id);
+                    const results = [];
+                    for (const row of rows.slice(-3))
+                    {
+                        const execution = await instance.request(`/rest/executions/${row.id}`);
+                        const data = typeof execution.data === 'string' ? parse(execution.data) : execution.data;
+                        const resultData = data?.resultData;
+                        results.push({ id: row.id, status: execution.status, stoppedAt: execution.stoppedAt, finished: execution.finished,
+                            lastNodeExecuted: resultData?.lastNodeExecuted, error: resultData?.error,
+                            tasks: Object.fromEntries(Object.entries(resultData?.runData ?? {}).map(([name, tasks]) => [name, tasks.slice(-2).map(task => ({ executionStatus: task.executionStatus, error: task.error }))])),
+                        });
+                    }
+                    suite.diagnostic(`Terminal-error timeout (persisted execution view, not a captured completion callback): ${JSON.stringify({ mode, rows, consumer: await manager.consumers.info('HOST', 'terminal-ack'), results }).slice(0, 16000)}`);
+                }
+                catch (diagnosticError) { suite.diagnostic(`Terminal-error diagnostic failed: ${diagnosticError.message}`); }
+                throw error;
+            }
             const terminalRow = (await executions(terminal.id))[0];
             const terminalExecution = await instance.request(`/rest/executions/${terminalRow.id}`);
             const terminalData = typeof terminalExecution.data === 'string' ? parse(terminalExecution.data) : terminalExecution.data;
