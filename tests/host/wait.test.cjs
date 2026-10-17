@@ -45,7 +45,14 @@ async function host(directory, mode, postgres, redisPort)
     {
         const response = await fetch(url + path, { method, headers: { 'Content-Type': 'application/json', Cookie: cookie }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
         if (response.headers.get('set-cookie')) cookie = response.headers.get('set-cookie').split(';')[0];
-        const result = await response.json();
+        const responseBytes = await response.arrayBuffer();
+        const responseText = new TextDecoder().decode(responseBytes);
+        let result;
+        try { result = JSON.parse(responseText); }
+        catch (error)
+        {
+            throw new Error(`${method} ${path} HTTP ${response.status}: invalid JSON, ${responseBytes.byteLength} bytes, tail=${JSON.stringify(responseText.slice(-256))}`, { cause: error });
+        }
         assert.ok(response.ok, `${method} ${path} ${response.status}: ${JSON.stringify(result)}`);
         return result.data ?? result;
     }
