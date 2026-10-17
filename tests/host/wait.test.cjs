@@ -58,7 +58,7 @@ async function host(directory, mode, postgres, redisPort)
     }
     async function start()
     {
-        child = spawn(process.execPath, [process.env.N8N_TEST_CLI, 'start'], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
+        child = spawn(process.execPath, ['--require', join(__dirname, '../fixtures/completion-diagnostic.cjs'), process.env.N8N_TEST_CLI, 'start'], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
         await until(async () =>
         {
@@ -74,7 +74,7 @@ async function host(directory, mode, postgres, redisPort)
     catch (error) { await stop(child); error.stack += `\n${output}`; throw error; }
     async function startWorker()
     {
-        worker = spawn(process.execPath, [process.env.N8N_TEST_CLI, 'worker', '--concurrency=2'], { env: { ...environment, N8N_RUNNERS_BROKER_PORT: String(await port()) }, stdio: ['ignore', 'pipe', 'pipe'] });
+        worker = spawn(process.execPath, ['--require', join(__dirname, '../fixtures/completion-diagnostic.cjs'), process.env.N8N_TEST_CLI, 'worker', '--concurrency=2'], { env: { ...environment, N8N_RUNNERS_BROKER_PORT: String(await port()) }, stdio: ['ignore', 'pipe', 'pipe'] });
         worker.stdout.on('data', chunk => { output += chunk; }); worker.stderr.on('data', chunk => { output += chunk; });
     }
     return {
@@ -439,13 +439,19 @@ for (const mode of ['regular', 'queue'])
             await instance.request(`/rest/workflows/${retryWorkflow.id}/deactivate`, 'POST', {});
             suite.diagnostic('Native RetryOnFail completes on third HTTP attempt in one execution without broker redelivery');
 
+            const startedNativeErrors = [];
             for (const scenario of [
                 { suffix: 'terminal-code', node: { id: 'code-failure', name: 'CodeFailure', type: 'n8n-nodes-base.code', typeVersion: 2, position: [200, 0], parameters: { jsCode: "throw new Error('Synthetic Code failure');" } } },
                 { suffix: 'terminal-http', node: { ...retryNode, id: 'http-failure', name: 'HttpFailure', parameters: { url: `http://127.0.0.1:${slowServer.address().port}/terminal-http`, options: {} } } },
             ])
             {
                 const workflow = await createProcessingWorkflow(scenario.suffix, [scenario.node], { onExecutionError: 'acknowledge' });
-                await client.publish(`host.${scenario.suffix}`, Buffer.from('{}'));
+                startedNativeErrors.push({ ...scenario, workflow });
+            }
+            for (const scenario of startedNativeErrors) await client.publish(`host.${scenario.suffix}`, Buffer.from('{}'));
+            for (const scenario of startedNativeErrors)
+            {
+                const workflow = scenario.workflow;
                 await until(async () =>
                 {
                     const rows = await executions(workflow.id);
@@ -462,6 +468,7 @@ for (const mode of ['regular', 'queue'])
                 await instance.request(`/rest/workflows/${workflow.id}/deactivate`, 'POST', {});
                 suite.diagnostic(`${scenario.suffix}: one persisted native error, confirmed terminal-policy ACK and no broker redelivery${scenario.suffix === 'terminal-http' ? ' after three HTTP 401 attempts' : ''}`);
             }
+            suite.diagnostic(instance.output.split('\n').filter(line => line.startsWith('NATS_TEST_PUBLIC_COMPLETION')).slice(-4).join('\n'));
 
             const manualBatch = await createProcessingWorkflow('manual-batch', [collectNode], { batchSize: 2, onExecutionError: 'acknowledge' }, 'text', false);
             await until(async () => await server.connections() === 1);
