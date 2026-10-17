@@ -123,8 +123,20 @@ for (const mode of ['regular', 'queue'])
                 sqlite = new DatabaseSync(join(directory, 'host', '.n8n', 'database.sqlite'));
                 sqlite.exec('PRAGMA busy_timeout = 5000');
             }
-            const nodeDescriptions = await instance.request('/types/nodes.json');
-            const descriptions = Array.isArray(nodeDescriptions) ? nodeDescriptions : Object.values(nodeDescriptions);
+            let catalogParseFailures = 0;
+            const descriptions = await until(async () =>
+            {
+                let nodeDescriptions;
+                try { nodeDescriptions = await instance.request('/types/nodes.json'); }
+                catch (error)
+                {
+                    if (!(error.cause instanceof SyntaxError) || !error.message.startsWith('GET /types/nodes.json HTTP 200: invalid JSON')) throw error;
+                    if (++catalogParseFailures === 1) suite.diagnostic(`Waiting for the complete startup node catalog: ${error.message}`);
+                    return false;
+                }
+                const values = Array.isArray(nodeDescriptions) ? nodeDescriptions : Object.values(nodeDescriptions);
+                return values.some(value => value.name === 'n8n-nodes-nats-jetstream.natsJetstreamTrigger') && values.some(value => value.name === 'n8n-nodes-nats-jetstream.natsJetstream') ? values : false;
+            });
             assert.ok(descriptions.some(value => value.name === 'n8n-nodes-nats-jetstream.natsJetstreamTrigger'), 'Installed trigger must appear');
             assert.ok(descriptions.some(value => value.name === 'n8n-nodes-nats-jetstream.natsJetstream'), 'Installed publisher must appear');
             const credential = await instance.request('/rest/credentials', 'POST', { name: 'Local NATS Test', type: 'natsJetstreamApi', data: { servers: server.url, authentication: 'none' } });
