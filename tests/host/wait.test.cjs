@@ -226,6 +226,7 @@ for (const mode of ['regular', 'queue'])
                 const url = new URL(request.url, 'http://localhost');
                 requests.push(url.pathname);
                 if (url.pathname === '/native-retry' && requests.filter(path => path === '/native-retry').length < 3) response.statusCode = 503;
+                if (url.pathname === '/terminal-http') response.statusCode = 401;
                 const timer = setTimeout(() => { responseTimers.delete(timer); response.setHeader('Content-Type', 'application/json'); response.end('{}'); }, Number(url.searchParams.get('delayMs')));
                 responseTimers.add(timer);
                 response.on('close', () => { clearTimeout(timer); responseTimers.delete(timer); });
@@ -413,6 +414,30 @@ for (const mode of ['regular', 'queue'])
             assert.equal((await manager.consumers.info('HOST', 'native-retry')).num_redelivered, 0);
             await instance.request(`/rest/workflows/${retryWorkflow.id}/deactivate`, 'POST', {});
             suite.diagnostic('Native RetryOnFail completes on third HTTP attempt in one execution without broker redelivery');
+
+            for (const scenario of [
+                { suffix: 'terminal-code', node: { id: 'code-failure', name: 'CodeFailure', type: 'n8n-nodes-base.code', typeVersion: 2, position: [200, 0], parameters: { jsCode: "throw new Error('Synthetic Code failure');" } } },
+                { suffix: 'terminal-http', node: { ...retryNode, id: 'http-failure', name: 'HttpFailure', parameters: { url: `http://127.0.0.1:${slowServer.address().port}/terminal-http`, options: {} } } },
+            ])
+            {
+                const workflow = await createProcessingWorkflow(scenario.suffix, [scenario.node], { onExecutionError: 'acknowledge' });
+                await client.publish(`host.${scenario.suffix}`, Buffer.from('{}'));
+                await until(async () =>
+                {
+                    const rows = await executions(workflow.id);
+                    return rows.length === 1 && rows[0].status === 'error' && (await manager.consumers.info('HOST', scenario.suffix)).num_ack_pending === 0;
+                }, 30000);
+                const execution = await instance.request(`/rest/executions/${(await executions(workflow.id))[0].id}`);
+                const data = typeof execution.data === 'string' ? parse(execution.data) : execution.data;
+                assert.equal(data.resultData.lastNodeExecuted, scenario.node.name);
+                assert.equal(data.resultData.runData[scenario.node.name].at(-1).executionStatus, 'error');
+                assert.ok(data.resultData.error);
+                if (scenario.suffix === 'terminal-code') assert.match(data.resultData.error.message, /Synthetic Code failure/);
+                else assert.equal(requests.filter(path => path === '/terminal-http').length, 3);
+                assert.equal((await manager.consumers.info('HOST', scenario.suffix)).num_redelivered, 0);
+                await instance.request(`/rest/workflows/${workflow.id}/deactivate`, 'POST', {});
+                suite.diagnostic(`${scenario.suffix}: one persisted native error, confirmed terminal-policy ACK and no broker redelivery${scenario.suffix === 'terminal-http' ? ' after three HTTP 401 attempts' : ''}`);
+            }
 
             const manualBatch = await createProcessingWorkflow('manual-batch', [collectNode], { batchSize: 2, onExecutionError: 'acknowledge' }, 'text', false);
             await until(async () => await server.connections() === 1);
