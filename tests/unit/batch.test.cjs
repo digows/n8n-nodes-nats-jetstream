@@ -32,6 +32,14 @@ function failedNodeRun()
     };
 }
 
+function queuedNodeError()
+{
+    const result = failedNodeRun();
+    return { ...result, jobId: '18', startedAt: new Date(Date.now() - 100), data: { resultData: {
+        lastNodeExecuted: 'Fail', runData: {}, error: { ...result.data.resultData.error, node: { id: 'terminal-failure', name: 'Fail', type: 'n8n-nodes-base.stopAndError' } },
+    } } };
+}
+
 test('terminal error recognition requires matching failed-node evidence, not status alone', () =>
 {
     assert.equal(terminalNodeError(failedNodeRun()), true);
@@ -58,9 +66,9 @@ test('terminal error recognition requires matching failed-node evidence, not sta
 
 test('acknowledge policy settles a terminal node error without modifying the failed result', async () =>
 {
-    for (const policy of ['redeliver', 'acknowledge'])
+    for (const createResult of [failedNodeRun, queuedNodeError]) for (const policy of ['redeliver', 'acknowledge'])
     {
-        const result = failedNodeRun();
+        const result = createResult();
         const original = structuredClone(result);
         const selected = delivery(1);
         const context = triggerContext({}, {}, (_items, _response, completion) => completion.resolve(result));
@@ -69,6 +77,44 @@ test('acknowledge policy settles a terminal node error without modifying the fai
         assert.equal(selected.statistics.released, policy === 'redeliver' ? 1 : 0);
         assert.deepEqual(result, original);
         assert.deepEqual(context.failures, []);
+    }
+});
+
+test('queue completion summaries require a matching public node-error marker', () =>
+{
+    assert.equal(terminalNodeError(queuedNodeError()), true);
+    assert.equal(terminalNodeError(JSON.parse(JSON.stringify(queuedNodeError()))), true);
+    for (const mutate of [
+        result => { delete result.jobId; },
+        result => { result.jobId = ''; },
+        result => { result.jobId = 18; },
+        result => { delete result.startedAt; },
+        result => { result.startedAt = 'invalid'; },
+        result => { delete result.data.resultData.runData; },
+        result => { result.data.resultData.runData = []; },
+        result => { result.data.resultData.runData = 1; },
+        result => { result.data.resultData.error = 'Unknown failure'; },
+        result => { delete result.data.resultData.error.node; },
+        result => { result.data.resultData.error.node = null; },
+        result => { result.data.resultData.error.node.name = 'Other'; },
+        result => { result.data.resultData.error = { message: 'Persistence failed after node failure' }; },
+        result => { result.status = 'canceled'; },
+        result => { result.status = 'crashed'; },
+    ])
+    {
+        const result = queuedNodeError();
+        mutate(result);
+        assert.equal(terminalNodeError(result), false);
+    }
+});
+
+test('queue summary recognition never overrides contradictory full task or preflight evidence', () =>
+{
+    for (const task of [{ executionStatus: 'error' }, { executionStatus: 'running' }, { executionStatus: 'error', error: { message: 'Different node error' } }])
+    {
+        const result = queuedNodeError();
+        result.data.resultData.runData.Fail = [task];
+        assert.equal(terminalNodeError(result), false);
     }
 });
 

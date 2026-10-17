@@ -26,9 +26,18 @@ export function terminalNodeError(result: IRun | undefined): boolean
     const resultData = result.data?.resultData;
     const nodeName = resultData?.lastNodeExecuted;
     if (!nodeName || !resultData.error) return false;
-    const task = resultData.runData?.[nodeName]?.at(-1);
-    // Infrastructure failures may also resolve as status=error, without a matching failed node.
-    return task?.executionStatus === 'error' && Boolean(task.error) && isDeepStrictEqual(task.error, resultData.error);
+    const runData = resultData.runData;
+    if (!runData || typeof runData !== 'object' || Array.isArray(runData)) return false;
+    const task = runData?.[nodeName]?.at(-1);
+    if (Object.keys(runData).length > 0)
+    {
+        return task?.executionStatus === 'error' && Boolean(task.error) && isDeepStrictEqual(task.error, resultData.error);
+    }
+    // Queue completion summaries omit tasks. Retain public node-error evidence;
+    // a job identifier and last node alone also occur after infrastructure failures.
+    const failedNode = typeof resultData.error === 'object' && 'node' in resultData.error ? resultData.error.node : undefined;
+    return typeof result.jobId === 'string' && result.jobId.length > 0 &&
+        Boolean(result.startedAt) && Number.isFinite(new Date(result.startedAt).getTime()) && failedNode?.name === nodeName;
 }
 
 export async function deliverMessage(context: ITriggerFunctions, message: JsMsg, options: DeliveryOptions, signal: AbortSignal, connected: () => boolean): Promise<void>

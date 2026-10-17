@@ -4,13 +4,13 @@ This is an unverified community package for self-hosted n8n. Publishing to npm d
 
 ## Published version
 
-[Version 0.1.0](https://www.npmjs.com/package/n8n-nodes-nats-jetstream/v/0.1.0) is published with npm dist-tag `latest`, from annotated tag `v0.1.0` at source `52f1c798bbe33ec6e612335be902f11f3cb86ac1`. [The publication workflow](https://github.com/digows/n8n-nodes-nats-jetstream/actions/runs/38029187121) succeeded and the public tarball was independently downloaded and checksum-verified. Documentation and discoverability changes on `main` after that tag do not modify the immutable npm version.
+[Version 0.1.1](https://www.npmjs.com/package/n8n-nodes-nats-jetstream/v/0.1.1) is published with npm dist-tag `latest`, from annotated tag `v0.1.1` at source `df29560b2e0d7bd1f1064e1902e4bb5cd5a066d6`. [The publication workflow](https://github.com/digows/n8n-nodes-nats-jetstream/actions/runs/38959853523) succeeded and the public tarball was independently downloaded and checksum-verified. Candidate changes on `main` do not modify the immutable npm version; 0.1.2 publication awaits complete host qualification.
 
 ## Validation
 
 `.github/workflows/ci.yml` runs on pushes to `main`, pull requests targeting `main`, and calls from the publish workflow. It uses Node.js 24.21.0, `npm ci`, official build/lint, typechecking, unit tests, and all broker tests against checksum-pinned NATS 2.15.1 and 2.9.25 with the official JWT fixture generator 0.0.10-5. It also previews the npm package and checks that validation did not modify package metadata or the lockfile. Third-party Actions are pinned to full commit hashes.
 
-The actual n8n regular/queue host suite is not run by this CI; its isolated n8n/PostgreSQL/Redis setup and measured results remain documented in [validation](validation.md). CI success is not evidence of a fresh host-suite run.
+The subsequent `host` job runs the actual n8n **2.42.6** regular/queue suite with isolated SQLite/PostgreSQL databases and pinned native NATS **2.14.6** and Redis **8.10.0** fixtures. It installs the built package and the host's exact `n8n-workflow` peer in a separate community-node directory. Fixture data and npm cache use a task-specific temporary directory; no production services or secrets are required. Publication inherits this host gate through the reusable CI. A passing build/unit/broker job alone is not a passing host result; current candidate qualification and historical measurements are distinguished in [validation](validation.md).
 
 ## One-time publishing setup
 

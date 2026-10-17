@@ -58,7 +58,7 @@ async function host(directory, mode, postgres, redisPort)
     }
     async function start()
     {
-        child = spawn(process.execPath, ['--require', join(__dirname, '../fixtures/completion-diagnostic.cjs'), process.env.N8N_TEST_CLI, 'start'], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
+        child = spawn(process.execPath, [process.env.N8N_TEST_CLI, 'start'], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
         await until(async () =>
         {
@@ -74,7 +74,7 @@ async function host(directory, mode, postgres, redisPort)
     catch (error) { await stop(child); error.stack += `\n${output}`; throw error; }
     async function startWorker()
     {
-        worker = spawn(process.execPath, ['--require', join(__dirname, '../fixtures/completion-diagnostic.cjs'), process.env.N8N_TEST_CLI, 'worker', '--concurrency=2'], { env: { ...environment, N8N_RUNNERS_BROKER_PORT: String(await port()) }, stdio: ['ignore', 'pipe', 'pipe'] });
+        worker = spawn(process.execPath, [process.env.N8N_TEST_CLI, 'worker', '--concurrency=2'], { env: { ...environment, N8N_RUNNERS_BROKER_PORT: String(await port()) }, stdio: ['ignore', 'pipe', 'pipe'] });
         worker.stdout.on('data', chunk => { output += chunk; }); worker.stderr.on('data', chunk => { output += chunk; });
     }
     return {
@@ -394,11 +394,15 @@ for (const mode of ['regular', 'queue'])
             assert.equal((await manager.consumers.info('HOST', 'terminal-ack')).num_redelivered, 0);
             await instance.request(`/rest/workflows/${terminal.id}/deactivate`, 'POST', {});
             suite.diagnostic('Native failed batch remains persisted as error, preserves raw Text/pairing and receives terminal-policy ACKs');
-            suite.diagnostic(instance.output.split('\n').filter(line => line.startsWith('NATS_TEST_PUBLIC_COMPLETION')).slice(-3).join('\n'));
 
             const defaultError = await createProcessingWorkflow('terminal-redeliver', [terminalNode]);
             await client.publish('host.terminal-redeliver', Buffer.from('{}'));
             await until(async () => (await manager.consumers.info('HOST', 'terminal-redeliver')).num_redelivered > 0, 30000);
+            await until(async () =>
+            {
+                const rows = await executions(defaultError.id);
+                return rows.length >= 2 && rows.every(row => row.status === 'error');
+            });
             await instance.request(`/rest/workflows/${defaultError.id}/deactivate`, 'POST', {});
             assert.ok((await executions(defaultError.id)).every(row => row.status === 'error'));
 
